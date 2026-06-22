@@ -17,6 +17,7 @@ ADMIN_NUMBER = "573167731698"
 ZONA_HORARIA = pytz.timezone("America/Bogota")
 
 historial = {}
+mensajes_procesados = set()  # FIX: evitar duplicados de webhook
 
 # Menú base
 menu = {
@@ -35,11 +36,13 @@ notas_admin = []
 domicilio_activo = True
 tiempo_espera = None  # en minutos, None = sin aviso
 
+
 def esta_abierto():
     """Retorna True si el local está en horario de atención (1pm - 11pm hora Colombia)"""
     ahora = datetime.now(ZONA_HORARIA)
     hora = ahora.hour
     return 13 <= hora < 23
+
 
 def build_system_prompt():
     menu_activo = []
@@ -55,7 +58,11 @@ def build_system_prompt():
     if tiempo_espera:
         espera_txt = f"\nTIEMPO DE ESPERA ACTUAL: {tiempo_espera} minutos. Infórmalo al cliente al confirmar su pedido."
 
-    domicilio_txt = "Sí. Costo: $6.000. Mínimo: Sin mínimo. Horario de domicilios igual al de atención." if domicilio_activo else "No disponible por ahora. Solo atención en local."
+    domicilio_txt = (
+        "Sí. Costo: $6.000. Mínimo: Sin mínimo. Horario de domicilios igual al de atención."
+        if domicilio_activo
+        else "No disponible por ahora. Solo atención en local."
+    )
 
     return f"""Eres el asistente virtual de Sabores de Nariño, un bar de comidas rápidas ubicado en Cra 7 #6-43, Ipiales.
 HORARIO: 1:00pm – 11:00pm
@@ -64,25 +71,57 @@ MÉTODOS DE PAGO: Nequi, Daviplata, transferencia bancaria, efectivo.
 MENÚ:
 {chr(10).join(menu_activo)}
 {notas}{espera_txt}
-INSTRUCCIONES:
+
+INSTRUCCIONES CRÍTICAS PARA MANEJO DEL PEDIDO:
 - Habla amigable y natural como empleado real.
-- Al pedir, confirma cada ítem con precio y muestra el total.
-- Pregunta dirección si es domicilio.
-- Si quiere hablar con persona real, dile que lo comunicas con el equipo.
+- Cuando el cliente empiece a pedir, ve ACUMULANDO todos los productos en una lista interna.
+- NUNCA des el pedido por confirmado ni muestres el resumen/total hasta que el cliente diga explícitamente que ya terminó (frases como "es todo", "eso sería", "listo", "ya es todo", "eso es todo", "nada más").
+- Solo después de que el cliente confirme que terminó, muestra el resumen completo con TODOS los productos pedidos y el total.
+- Después del resumen, pregunta si es para domicilio o para recoger en local.
+- Si es domicilio: pide la dirección. NO vuelvas a listar el pedido ni el total de nuevo, solo confirma con "Perfecto, domicilio a [dirección]. Tu pedido ya está en camino 🛵".
+- Si es para recoger: confirma con "Perfecto, tu pedido estará listo para recoger en Cra 7 #6-43".
+- Si una categoría no está en el menú de hoy, dile amablemente que no está disponible.
 - No inventes productos ni precios.
 - Si no sabes algo, sugiere llamar directamente.
-- Si una categoría no está en el menú de hoy, dile amablemente que no está disponible por ahora.
-- Responde siempre en español."""
+- Si quiere hablar con persona real, dile que lo comunicas con el equipo.
+- Responde siempre en español.
+- Sé conciso, no repitas información innecesariamente."""
 
-def notificar_pedido_admin(numero_cliente, resumen_pedido):
-    """Envía notificación al admin cuando el bot confirma un pedido"""
+
+def notificar_pedido_admin(numero_cliente, confirmacion_bot):
+    """
+    Envía al admin el resumen COMPLETO del pedido:
+    recorre el historial del cliente y extrae solo los mensajes
+    relevantes para armar un resumen limpio.
+    """
+    # Buscar en el historial el último resumen que mostró el bot
+    # (el mensaje donde listó productos + total, antes de pedir dirección)
+    resumen_encontrado = ""
+    conv = historial.get(numero_cliente, [])
+
+    # Recorrer historial al revés buscando el mensaje del bot con el total
+    for msg in reversed(conv):
+        if msg["role"] == "assistant":
+            contenido = msg["content"].lower()
+            if "total" in contenido and any(p in contenido for p in ["$", "000"]):
+                resumen_encontrado = msg["content"]
+                break
+
+    # Si no encontró resumen con total, usar la confirmación final del bot
+    cuerpo = resumen_encontrado if resumen_encontrado else confirmacion_bot
+
+    ahora = datetime.now(ZONA_HORARIA).strftime("%I:%M %p")
     mensaje = (
-        f"🛎️ *Pedido nuevo*\n"
+        f"🛎️ *Pedido confirmado*\n"
         f"📱 Cliente: +{numero_cliente}\n"
+        f"🕐 Hora: {ahora}\n"
         f"────────────────\n"
-        f"{resumen_pedido}"
+        f"{cuerpo}\n"
+        f"────────────────\n"
+        f"✅ {confirmacion_bot}"
     )
     enviar_whatsapp(ADMIN_NUMBER, mensaje)
+
 
 def procesar_comando_admin(texto):
     global domicilio_activo, tiempo_espera
@@ -135,6 +174,14 @@ def procesar_comando_admin(texto):
         notas_admin.clear()
         return "✅ Todas las notas borradas."
 
+    # LIMPIAR historial de un cliente: "limpia 573001234567"
+    if t.startswith("limpia "):
+        num = t.replace("limpia ", "").strip()
+        if num in historial:
+            historial.pop(num)
+            return f"✅ Historial de {num} borrado."
+        return f"⚠️ No hay historial para {num}."
+
     # ESTADO
     if t in ["estado", "menu", "menú", "ver menu", "ver menú"]:
         activos = [k for k in menu.keys() if k not in categorias_desactivadas]
@@ -142,6 +189,7 @@ def procesar_comando_admin(texto):
         notas_txt = "\n- ".join(notas_admin) if notas_admin else "ninguna"
         espera_txt = f"{tiempo_espera} min" if tiempo_espera else "sin aviso"
         abierto = "✅ Abierto" if esta_abierto() else "❌ Cerrado"
+        clientes_activos = len(historial)
         return (
             f"📋 *Estado actual:*\n"
             f"🕐 Local: {abierto}\n"
@@ -149,7 +197,8 @@ def procesar_comando_admin(texto):
             f"❌ Desactivados: {', '.join(desactivos) if desactivos else 'ninguno'}\n"
             f"🛵 Domicilio: {'✅ Activo' if domicilio_activo else '❌ Desactivado'}\n"
             f"⏱️ Espera: {espera_txt}\n"
-            f"📝 Notas: {notas_txt}"
+            f"📝 Notas: {notas_txt}\n"
+            f"👥 Clientes en conversación: {clientes_activos}"
         )
 
     # AYUDA
@@ -163,27 +212,30 @@ def procesar_comando_admin(texto):
             "• *sin espera* → quita el aviso\n"
             "• *nota no hay doble carne* → nota especial\n"
             "• *borra notas* → elimina notas\n"
+            "• *limpia 573001234567* → borra historial de cliente\n"
             "• *estado* → ver todo\n\n"
             "Categorías: hamburguesas, perros, salchipapas, mazorcadas, burritos, otros, bebidas, combos"
         )
 
     return None
 
+
 def enviar_whatsapp(numero, mensaje):
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
     headers = {
         "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
     data = {
         "messaging_product": "whatsapp",
         "to": numero,
         "type": "text",
-        "text": {"body": mensaje}
+        "text": {"body": mensaje},
     }
     r = requests.post(url, headers=headers, json=data)
     print("RESPUESTA DE META AL ENVIAR:", r.status_code, r.text)
     return r
+
 
 @app.get("/webhook")
 async def verificar_webhook(request: Request):
@@ -191,6 +243,7 @@ async def verificar_webhook(request: Request):
     if params.get("hub.verify_token") == VERIFY_TOKEN:
         return PlainTextResponse(params.get("hub.challenge", ""))
     return PlainTextResponse("Token invalido", status_code=403)
+
 
 @app.post("/webhook")
 async def recibir_mensaje(request: Request):
@@ -202,6 +255,29 @@ async def recibir_mensaje(request: Request):
             return {"status": "ok"}
 
         mensaje = entry["messages"][0]
+
+        # FIX 1: ignorar mensajes que no sean de texto (audio, imagen, sticker, etc.)
+        if mensaje.get("type") != "text":
+            numero = mensaje["from"]
+            if numero != ADMIN_NUMBER:
+                enviar_whatsapp(
+                    numero,
+                    "Por ahora solo puedo leer mensajes de texto 😊. Escríbeme tu pedido y con gusto te atiendo.",
+                )
+            return {"status": "ok"}
+
+        # FIX 2: deduplicar mensajes (Meta a veces reenvía el mismo webhook)
+        message_id = mensaje.get("id", "")
+        if message_id in mensajes_procesados:
+            print(f"Mensaje duplicado ignorado: {message_id}")
+            return {"status": "ok"}
+        mensajes_procesados.add(message_id)
+        # Limpiar el set si crece demasiado (mantener los últimos 500)
+        if len(mensajes_procesados) > 500:
+            ids_lista = list(mensajes_procesados)
+            mensajes_procesados.clear()
+            mensajes_procesados.update(ids_lista[-250:])
+
         numero = mensaje["from"]
         texto = mensaje["text"]["body"]
         print(f"Mensaje de {numero}: {texto}")
@@ -212,10 +288,15 @@ async def recibir_mensaje(request: Request):
             if respuesta_admin:
                 enviar_whatsapp(numero, respuesta_admin)
                 return {"status": "ok"}
+            # Si el admin escribe algo que no es un comando, también pasa por Claude normalmente
 
         # ── HORARIO: si está cerrado, respuesta automática sin gastar Claude ──
         if not esta_abierto() and numero != ADMIN_NUMBER:
-            enviar_whatsapp(numero, "¡Hola! 😊 Gracias por escribirnos. Por ahora estamos cerrados. Nuestro horario es de *4:00pm a 11:00pm*. ¡Te esperamos pronto! 🍔")
+            enviar_whatsapp(
+                numero,
+                # FIX 3: el horario decía 4pm pero la función usa 1pm. Ahora es consistente.
+                "¡Hola! 😊 Gracias por escribirnos. Por ahora estamos cerrados. Nuestro horario es de *1:00pm a 11:00pm*. ¡Te esperamos pronto! 🍔",
+            )
             return {"status": "ok"}
 
         # ── CLIENTE ──
@@ -226,22 +307,39 @@ async def recibir_mensaje(request: Request):
         cliente = anthropic.Anthropic(api_key=CLAUDE_KEY)
         respuesta = cliente.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=500,
+            max_tokens=600,
             system=build_system_prompt(),
-            messages=historial[numero]
+            messages=historial[numero],
         )
         texto_respuesta = respuesta.content[0].text
         print(f"Respuesta generada: {texto_respuesta}")
         historial[numero].append({"role": "assistant", "content": texto_respuesta})
 
-        if len(historial[numero]) > 20:
-            historial[numero] = historial[numero][-20:]
+        # FIX 4: mantener las últimas 30 entradas (antes era 20, muy poco para pedidos largos)
+        if len(historial[numero]) > 30:
+            historial[numero] = historial[numero][-30:]
 
         enviar_whatsapp(numero, texto_respuesta)
 
-        # ── NOTIFICAR AL ADMIN si el bot confirmó un pedido ──
-        palabras_pedido = ["total:", "tu pedido", "pedido confirmado", "resumen del pedido", "dirección"]
-        if any(p in texto_respuesta.lower() for p in palabras_pedido):
+        # ── NOTIFICAR AL ADMIN solo cuando el pedido está 100% cerrado ──
+        # Se activa únicamente cuando el bot confirma domicilio con dirección
+        # o confirma recogida en local — no antes.
+        palabras_cierre = [
+            "en camino",
+            "pedido ya está en camino",
+            "listo para recoger",
+            "pasamos a preparar",
+            "ya está en preparación",
+            "empezamos a preparar",
+        ]
+        es_cierre = any(p in texto_respuesta.lower() for p in palabras_cierre)
+        # Doble verificación: que también haya una dirección o confirmación de recogida
+        tiene_contexto = (
+            "domicilio" in texto_respuesta.lower()
+            or "recoger" in texto_respuesta.lower()
+            or "local" in texto_respuesta.lower()
+        )
+        if es_cierre and tiene_contexto:
             notificar_pedido_admin(numero, texto_respuesta)
 
         print("Mensaje enviado a WhatsApp")
