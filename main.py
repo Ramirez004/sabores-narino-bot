@@ -23,8 +23,8 @@ mensajes_procesados = set()
 
 # ── PEDIDOS ─────────────────────────────────────────────────────────────────
 # Lista en memoria. Cada pedido es un dict:
-# { id, numero, hora, resumen, direccion, tipo, estado }
-# estado: "activo" | "preparando" | "enviado" | "entregado"
+# { id, numero, hora, resumen, direccion, tipo, estado, modificaciones, quejas }
+# estado: "activo" | "preparando" | "enviado" | "entregado" | "cancelado"
 pedidos = []
 
 
@@ -56,12 +56,23 @@ def registrar_pedido(numero_cliente, resumen, confirmacion_bot):
         "direccion": direccion if direccion else ("En local" if tipo == "recoger" else "Ver resumen"),
         "tipo": tipo,
         "estado": "activo",
+        "modificaciones": [],  # Nuevas opciones
+        "quejas": [],
+        "cambios_platos": [],
     }
     pedidos.append(pedido)
     # Mantener solo los últimos 100 pedidos en memoria
     if len(pedidos) > 100:
         pedidos.pop(0)
     return pedido
+
+
+def buscar_pedido_cliente(numero_cliente):
+    """Busca el último pedido activo de un cliente."""
+    for p in reversed(pedidos):
+        if p["numero"] == numero_cliente and p["estado"] in ["activo", "preparando"]:
+            return p
+    return None
 
 
 # ── MENÚ ─────────────────────────────────────────────────────────────────────
@@ -104,6 +115,11 @@ MÉTODOS DE PAGO: Nequi, Daviplata, transferencia, efectivo.
 MENÚ:
 {chr(10).join(menu_activo)}
 {notas}{espera_txt}
+
+OPCIONES ADICIONALES PARA CLIENTES:
+- Para ELIMINAR su pedido activo, el cliente debe escribir "eliminar pedido" o "cancelar pedido"
+- Para MODIFICAR su pedido (cambiar un plato por otro), debe escribir "modificar pedido" o "cambiar plato"
+- Para REPORTAR QUEJAS o cambios de platos, debe escribir "queja", "reclamación", "problema" o "cambio de plato"
 
 INSTRUCCIONES CRÍTICAS PARA MANEJO DEL PEDIDO:
 - Habla amigable y natural como empleado real.
@@ -191,556 +207,410 @@ def procesar_comando_admin(texto):
         notas_admin.clear()
         return "✅ Notas borradas."
 
-    if t.startswith("limpia "):
-        num = t.replace("limpia ", "").strip()
-        if num in historial:
-            historial.pop(num)
-            return f"✅ Historial de {num} borrado."
-        return f"⚠️ No hay historial para {num}."
-
-    if t in ["estado", "menu", "menú", "ver menu", "ver menú"]:
-        activos = [k for k in menu if k not in categorias_desactivadas]
-        desactivos = list(categorias_desactivadas)
-        notas_txt = "\n- ".join(notas_admin) if notas_admin else "ninguna"
-        pedidos_activos = len([p for p in pedidos if p["estado"] in ["activo", "preparando"]])
-        return (
-            f"📋 *Estado actual:*\n"
-            f"🕐 Local: {'✅ Abierto' if esta_abierto() else '❌ Cerrado'}\n"
-            f"✅ Activos: {', '.join(activos) or 'ninguno'}\n"
-            f"❌ Desactivados: {', '.join(desactivos) or 'ninguno'}\n"
-            f"🛵 Domicilio: {'✅' if domicilio_activo else '❌'}\n"
-            f"⏱️ Espera: {f'{tiempo_espera} min' if tiempo_espera else 'sin aviso'}\n"
-            f"📝 Notas: {notas_txt}\n"
-            f"🛎️ Pedidos activos: {pedidos_activos}"
-        )
-
-    if t in ["ayuda", "help", "comandos"]:
-        return (
-            "🛠️ *Comandos de admin:*\n\n"
-            "• *quita hamburguesas* / *activa hamburguesas*\n"
-            "• *quita domicilio* / *activa domicilio*\n"
-            "• *espera 30* / *sin espera*\n"
-            "• *nota no hay doble carne*\n"
-            "• *borra notas*\n"
-            "• *limpia 573001234567*\n"
-            "• *estado*\n\n"
-            "Panel de pedidos: /panel"
-        )
-
     return None
 
 
-PANEL_HTML = """<!DOCTYPE html>
+# ── PANEL HTML ───────────────────────────────────────────────────────────────
+
+PANEL_HTML = """
+<!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pedidos — Sabores de Nariño</title>
-  <style>
-    :root {
-      --bg:       #141414;
-      --surface:  #1e1e1e;
-      --border:   #2a2a2a;
-      --accent:   #f5a623;
-      --accent2:  #e8523a;
-      --text:     #f0f0f0;
-      --muted:    #777;
-      --green:    #3ecf8e;
-      --blue:     #4c9cf1;
-      --yellow:   #f5c842;
-      --red:      #e8523a;
-    }
-
-    * { margin:0; padding:0; box-sizing:border-box; }
-
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      min-height: 100vh;
-    }
-
-    /* ── HEADER ── */
-    header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 16px 24px;
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      position: sticky;
-      top: 0;
-      z-index: 100;
-    }
-    .logo { display: flex; align-items: center; gap: 10px; }
-    .logo span { font-size: 1.5rem; }
-    .logo h1 { font-size: 1.1rem; font-weight: 700; color: var(--accent); }
-    .logo p  { font-size: .75rem; color: var(--muted); }
-
-    .header-right { display: flex; align-items: center; gap: 16px; }
-    .status-badge {
-      padding: 6px 14px;
-      border-radius: 99px;
-      font-size: .75rem;
-      font-weight: 700;
-      letter-spacing: .04em;
-    }
-    .status-badge.open  { background: #1a3a2a; color: var(--green); }
-    .status-badge.closed{ background: #3a1a1a; color: var(--red); }
-
-    .refresh-btn {
-      background: transparent;
-      border: 1px solid var(--border);
-      color: var(--muted);
-      padding: 6px 12px;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: .8rem;
-      transition: all .2s;
-    }
-    .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
-
-    /* ── STATS ── */
-    .stats {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 12px;
-      padding: 20px 24px 0;
-    }
-    @media(max-width:700px){ .stats{ grid-template-columns:repeat(2,1fr); } }
-
-    .stat-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 16px;
-    }
-    .stat-card .num { font-size: 2rem; font-weight: 800; }
-    .stat-card .lbl { font-size: .75rem; color: var(--muted); margin-top: 2px; }
-    .stat-card.activo    .num { color: var(--yellow); }
-    .stat-card.preparando .num { color: var(--blue); }
-    .stat-card.enviado   .num { color: var(--green); }
-    .stat-card.total     .num { color: var(--accent); }
-
-    /* ── FILTERS ── */
-    .filters {
-      display: flex;
-      gap: 8px;
-      padding: 20px 24px 0;
-      flex-wrap: wrap;
-    }
-    .filter-btn {
-      padding: 7px 16px;
-      border-radius: 99px;
-      border: 1px solid var(--border);
-      background: transparent;
-      color: var(--muted);
-      font-size: .8rem;
-      cursor: pointer;
-      transition: all .2s;
-    }
-    .filter-btn:hover  { border-color: var(--accent); color: var(--accent); }
-    .filter-btn.active { background: var(--accent); border-color: var(--accent); color: #1a1a1a; font-weight: 700; }
-
-    /* ── PEDIDOS GRID ── */
-    .pedidos-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-      gap: 16px;
-      padding: 20px 24px;
-    }
-
-    .pedido-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      transition: border-color .2s;
-      position: relative;
-    }
-    .pedido-card:hover { border-color: #444; }
-
-    /* borde izquierdo por estado */
-    .pedido-card.activo    { border-left: 3px solid var(--yellow); }
-    .pedido-card.preparando{ border-left: 3px solid var(--blue); }
-    .pedido-card.enviado   { border-left: 3px solid var(--green); }
-    .pedido-card.entregado { border-left: 3px solid var(--muted); opacity: .6; }
-
-    .card-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 14px 16px 10px;
-      border-bottom: 1px solid var(--border);
-    }
-    .card-id { font-size: .7rem; color: var(--muted); font-weight: 700; letter-spacing: .08em; }
-    .card-hora { font-size: .75rem; color: var(--muted); }
-
-    .estado-pill {
-      padding: 3px 10px;
-      border-radius: 99px;
-      font-size: .7rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: .05em;
-    }
-    .estado-pill.activo    { background:#3a3000; color: var(--yellow); }
-    .estado-pill.preparando{ background:#0a2040; color: var(--blue); }
-    .estado-pill.enviado   { background:#0a2a1a; color: var(--green); }
-    .estado-pill.entregado { background:#222;    color: var(--muted); }
-
-    .card-body { padding: 14px 16px; flex: 1; }
-
-    .cliente-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 10px;
-    }
-    .cliente-row .num  { font-size: .9rem; font-weight: 600; }
-    .tipo-badge {
-      font-size: .7rem;
-      padding: 2px 8px;
-      border-radius: 99px;
-      font-weight: 700;
-    }
-    .tipo-badge.domicilio { background:#1a1040; color: #a78bfa; }
-    .tipo-badge.recoger   { background:#1a2a10; color: var(--green); }
-
-    .dir-row {
-      display: flex;
-      align-items: flex-start;
-      gap: 6px;
-      margin-bottom: 10px;
-      font-size: .82rem;
-      color: #ccc;
-    }
-    .dir-row a { color: var(--blue); text-decoration: none; }
-    .dir-row a:hover { text-decoration: underline; }
-
-    .resumen-box {
-      background: #181818;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 10px 12px;
-      font-size: .78rem;
-      color: #bbb;
-      line-height: 1.5;
-      max-height: 110px;
-      overflow-y: auto;
-      white-space: pre-wrap;
-    }
-    .resumen-box::-webkit-scrollbar { width: 4px; }
-    .resumen-box::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
-
-    /* ── ACCIONES ── */
-    .card-actions {
-      display: flex;
-      gap: 8px;
-      padding: 12px 16px;
-      border-top: 1px solid var(--border);
-      flex-wrap: wrap;
-    }
-    .action-btn {
-      flex: 1;
-      min-width: 80px;
-      padding: 8px 10px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      background: transparent;
-      color: var(--muted);
-      font-size: .75rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all .18s;
-      text-align: center;
-    }
-    .action-btn:hover { opacity: .85; }
-
-    .action-btn.btn-preparando { border-color: var(--blue);   color: var(--blue);  }
-    .action-btn.btn-preparando:hover { background: var(--blue); color: #fff; }
-    .action-btn.btn-enviado    { border-color: var(--green);  color: var(--green); }
-    .action-btn.btn-enviado:hover    { background: var(--green); color: #111; }
-    .action-btn.btn-entregado  { border-color: var(--muted);  color: var(--muted); }
-    .action-btn.btn-entregado:hover  { background: #333; color: #fff; }
-    .action-btn.btn-activo     { border-color: var(--yellow); color: var(--yellow); }
-    .action-btn.btn-activo:hover     { background: var(--yellow); color: #111; }
-
-    /* ── EMPTY ── */
-    .empty {
-      grid-column: 1/-1;
-      text-align: center;
-      padding: 60px 20px;
-      color: var(--muted);
-    }
-    .empty .icon { font-size: 3rem; margin-bottom: 12px; }
-    .empty p { font-size: .9rem; }
-
-    /* ── TOAST ── */
-    #toast {
-      position: fixed;
-      bottom: 24px;
-      left: 50%;
-      transform: translateX(-50%) translateY(20px);
-      background: #222;
-      border: 1px solid #444;
-      color: var(--text);
-      padding: 12px 24px;
-      border-radius: 10px;
-      font-size: .85rem;
-      opacity: 0;
-      transition: all .3s;
-      z-index: 999;
-      pointer-events: none;
-    }
-    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-
-    /* ── AUTO-REFRESH indicator ── */
-    .auto-refresh {
-      font-size: .72rem;
-      color: var(--muted);
-      display: flex;
-      align-items: center;
-      gap: 5px;
-    }
-    .dot {
-      width: 6px; height: 6px;
-      background: var(--green);
-      border-radius: 50%;
-      animation: pulse 2s infinite;
-    }
-    @keyframes pulse {
-      0%,100%{ opacity:1; } 50%{ opacity:.3; }
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Pedidos - Sabores de Nariño</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            color: #fff;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #f5a623;
+            padding-bottom: 20px;
+        }
+        h1 {
+            font-size: 2.5rem;
+            color: #f5a623;
+            margin-bottom: 5px;
+        }
+        .header-info {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+            margin-top: 15px;
+            font-size: 0.9rem;
+            color: #ccc;
+        }
+        .pedidos-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .pedido-card {
+            background: linear-gradient(135deg, #2d2d2d 0%, #3d3d3d 100%);
+            border-left: 4px solid #f5a623;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            transition: transform 0.2s;
+        }
+        .pedido-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 20px rgba(245, 166, 35, 0.2);
+        }
+        .pedido-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #444;
+            padding-bottom: 10px;
+        }
+        .pedido-id {
+            font-size: 1.3rem;
+            font-weight: bold;
+            color: #f5a623;
+        }
+        .pedido-hora {
+            font-size: 0.85rem;
+            color: #aaa;
+        }
+        .pedido-tipo {
+            display: inline-block;
+            background: #f5a623;
+            color: #1a1a1a;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+        .pedido-cliente {
+            font-size: 0.9rem;
+            color: #ccc;
+            margin: 10px 0;
+        }
+        .pedido-direccion {
+            font-size: 0.85rem;
+            color: #aaa;
+            margin: 8px 0;
+            word-break: break-word;
+        }
+        .pedido-resumen {
+            background: #1a1a1a;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            color: #ddd;
+            margin: 12px 0;
+            max-height: 150px;
+            overflow-y: auto;
+            border-left: 3px solid #f5a623;
+        }
+        .estado-select {
+            width: 100%;
+            padding: 8px;
+            background: #1a1a1a;
+            border: 1px solid #f5a623;
+            border-radius: 4px;
+            color: #fff;
+            margin: 12px 0;
+            cursor: pointer;
+        }
+        .estado-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            margin-right: 5px;
+        }
+        .estado-activo { background: #4CAF50; color: #fff; }
+        .estado-preparando { background: #FF9800; color: #fff; }
+        .estado-enviado { background: #2196F3; color: #fff; }
+        .estado-entregado { background: #9C27B0; color: #fff; }
+        .estado-cancelado { background: #f44336; color: #fff; }
+        
+        .modificaciones {
+            background: #1a1a1a;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-size: 0.85rem;
+            border-left: 3px solid #FF9800;
+        }
+        .quejas {
+            background: #1a1a1a;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-size: 0.85rem;
+            border-left: 3px solid #f44336;
+        }
+        .cambios-platos {
+            background: #1a1a1a;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-size: 0.85rem;
+            border-left: 3px solid #00BCD4;
+        }
+        
+        button {
+            background: #f5a623;
+            border: none;
+            color: #1a1a1a;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 0.9rem;
+            transition: background 0.2s;
+            width: 100%;
+            margin-top: 10px;
+        }
+        button:hover { background: #e09510; }
+        
+        .logout-btn {
+            background: #f44336;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            float: right;
+            margin-top: 0;
+            width: auto;
+        }
+        .logout-btn:hover { background: #d32f2f; }
+        
+        .login-box {
+            background: linear-gradient(135deg, #2d2d2d 0%, #3d3d3d 100%);
+            border: 2px solid #f5a623;
+            border-radius: 10px;
+            padding: 40px;
+            max-width: 400px;
+            margin: 100px auto;
+            text-align: center;
+        }
+        .login-box h1 { font-size: 2rem; margin-bottom: 30px; }
+        .login-box input {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 12px;
+            background: #1a1a1a;
+            border: 1px solid #f5a623;
+            border-radius: 10px;
+            color: #fff;
+            font-size: 1rem;
+            outline: none;
+        }
+        .login-box input:focus { border-color: #e09510; }
+        .login-box button {
+            width: 100%;
+            padding: 12px;
+            background: #f5a623;
+            border: none;
+            border-radius: 10px;
+            color: #1a1a1a;
+            font-weight: 700;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+        .login-box button:hover { background: #e09510; }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #aaa;
+        }
+    </style>
 </head>
 <body>
-
-<header>
-  <div class="logo">
-    <span>🍔</span>
-    <div>
-      <h1>Sabores de Nariño</h1>
-      <p>Panel de pedidos</p>
+<div class="container">
+    <header id="header" style="display: none;">
+        <h1>🍔 Sabores de Nariño - Panel de Pedidos</h1>
+        <button class="logout-btn" onclick="logout()">Cerrar sesión</button>
+        <div class="header-info">
+            <span id="tiempo-actual"></span>
+            <span id="total-pedidos"></span>
+            <span id="pedidos-activos"></span>
+        </div>
+    </header>
+    
+    <div id="login-section" class="login-box">
+        <h1>🍔 Sabores de Nariño</h1>
+        <p style="margin-bottom: 20px; color: #aaa;">Panel de pedidos</p>
+        <input type="password" id="pw" placeholder="Contraseña" onkeydown="if(event.key==='Enter')login()">
+        <button onclick="login()">Entrar</button>
     </div>
-  </div>
-  <div class="header-right">
-    <div class="auto-refresh"><div class="dot"></div> En vivo</div>
-    <div id="localStatus" class="status-badge">⏳</div>
-    <button class="refresh-btn" onclick="cargar()">↻ Actualizar</button>
-  </div>
-</header>
-
-<!-- Stats -->
-<div class="stats">
-  <div class="stat-card activo">
-    <div class="num" id="cnt-activo">0</div>
-    <div class="lbl">🟡 Activos</div>
-  </div>
-  <div class="stat-card preparando">
-    <div class="num" id="cnt-preparando">0</div>
-    <div class="lbl">🔵 Preparando</div>
-  </div>
-  <div class="stat-card enviado">
-    <div class="num" id="cnt-enviado">0</div>
-    <div class="lbl">🟢 Enviados hoy</div>
-  </div>
-  <div class="stat-card total">
-    <div class="num" id="cnt-total">0</div>
-    <div class="lbl">📦 Total del día</div>
-  </div>
+    
+    <div id="pedidos-section" style="display: none;">
+        <div id="pedidos-container" class="pedidos-grid"></div>
+        <div id="empty-state" class="empty-state" style="display: none;">No hay pedidos aún</div>
+    </div>
 </div>
-
-<!-- Filtros -->
-<div class="filters">
-  <button class="filter-btn active" onclick="setFiltro('todos', this)">Todos</button>
-  <button class="filter-btn" onclick="setFiltro('activo', this)">🟡 Activos</button>
-  <button class="filter-btn" onclick="setFiltro('preparando', this)">🔵 Preparando</button>
-  <button class="filter-btn" onclick="setFiltro('enviado', this)">🟢 Enviados</button>
-  <button class="filter-btn" onclick="setFiltro('entregado', this)">✅ Entregados</button>
-  <button class="filter-btn" onclick="setFiltro('domicilio', this)">🛵 Domicilios</button>
-  <button class="filter-btn" onclick="setFiltro('recoger', this)">🏠 Recogidas</button>
-</div>
-
-<!-- Grid de pedidos -->
-<div class="pedidos-grid" id="grid"></div>
-
-<!-- Toast -->
-<div id="toast"></div>
 
 <script>
-const PW = "{{PANEL_PASSWORD}}";
-let todosLosPedidos = [];
-let filtroActual = "todos";
-let intervalo;
+let password = '';
 
-function esHoy(isoStr) {
-  const hoy = new Date().toDateString();
-  return new Date(isoStr).toDateString() === hoy;
+function login() {
+    const pw = document.getElementById('pw').value;
+    password = pw;
+    cargarPedidos();
+    document.getElementById('login-section').style.display = 'none';
+    document.getElementById('header').style.display = 'block';
+    document.getElementById('pedidos-section').style.display = 'block';
 }
 
-async function cargar() {
-  try {
-    const r = await fetch(`/api/pedidos?pw=${PW}`);
-    const data = await r.json();
-    todosLosPedidos = data.pedidos;
-    actualizar();
-  } catch(e) {
-    console.error(e);
-  }
+function logout() {
+    password = '';
+    document.getElementById('login-section').style.display = 'block';
+    document.getElementById('header').style.display = 'none';
+    document.getElementById('pedidos-section').style.display = 'none';
+    document.getElementById('pw').value = '';
 }
 
-function actualizar() {
-  // Stats
-  const hoy = todosLosPedidos.filter(p => esHoy(p.hora_iso));
-  document.getElementById("cnt-activo").textContent    = hoy.filter(p=>p.estado==="activo").length;
-  document.getElementById("cnt-preparando").textContent= hoy.filter(p=>p.estado==="preparando").length;
-  document.getElementById("cnt-enviado").textContent   = hoy.filter(p=>p.estado==="enviado"||p.estado==="entregado").length;
-  document.getElementById("cnt-total").textContent     = hoy.length;
-
-  // Horario (simple, hora local Colombia UTC-5)
-  const h = new Date().getUTCHours() - 5;
-  const abierto = h >= 13 && h < 23;
-  const badge = document.getElementById("localStatus");
-  badge.textContent = abierto ? "✅ Abierto" : "❌ Cerrado";
-  badge.className = "status-badge " + (abierto ? "open" : "closed");
-
-  // Filtrar
-  let lista = todosLosPedidos;
-  if (filtroActual === "domicilio" || filtroActual === "recoger") {
-    lista = lista.filter(p => p.tipo === filtroActual);
-  } else if (filtroActual !== "todos") {
-    lista = lista.filter(p => p.estado === filtroActual);
-  }
-
-  // Render
-  const grid = document.getElementById("grid");
-  if (lista.length === 0) {
-    grid.innerHTML = `<div class="empty"><div class="icon">🍽️</div><p>No hay pedidos aquí todavía.</p></div>`;
-    return;
-  }
-
-  grid.innerHTML = lista.map(p => {
-    const esMaps = p.direccion.startsWith("http");
-    const dirHtml = esMaps
-      ? `<a href="${p.direccion}" target="_blank">📍 Ver en Google Maps</a>`
-      : `📍 ${p.direccion}`;
-
-    const botones = botonesAccion(p);
-
-    return `
-    <div class="pedido-card ${p.estado}" id="card-${p.id}">
-      <div class="card-header">
-        <div>
-          <div class="card-id">#${p.id}</div>
-          <div class="card-hora">${p.hora}</div>
-        </div>
-        <span class="estado-pill ${p.estado}">${estadoLabel(p.estado)}</span>
-      </div>
-      <div class="card-body">
-        <div class="cliente-row">
-          <span class="num">+${p.numero}</span>
-          <span class="tipo-badge ${p.tipo}">${p.tipo === "domicilio" ? "🛵 Domicilio" : "🏠 Recoger"}</span>
-        </div>
-        <div class="dir-row">${dirHtml}</div>
-        <div class="resumen-box">${p.resumen}</div>
-      </div>
-      <div class="card-actions">${botones}</div>
-    </div>`;
-  }).join("");
-}
-
-function estadoLabel(e) {
-  return { activo:"🟡 Activo", preparando:"🔵 Preparando", enviado:"🟢 Enviado", entregado:"✅ Entregado" }[e] || e;
-}
-
-function botonesAccion(p) {
-  const btns = [];
-  if (p.estado === "activo") {
-    btns.push(`<button class="action-btn btn-preparando" onclick="cambiarEstado('${p.id}','preparando')">🔵 Preparando</button>`);
-  }
-  if (p.estado === "activo" || p.estado === "preparando") {
-    btns.push(`<button class="action-btn btn-enviado" onclick="cambiarEstado('${p.id}','enviado')">🟢 ${p.tipo==='domicilio'?'Enviar':'Listo'}</button>`);
-  }
-  if (p.estado === "enviado") {
-    btns.push(`<button class="action-btn btn-entregado" onclick="cambiarEstado('${p.id}','entregado')">✅ Entregado</button>`);
-  }
-  if (p.estado !== "activo") {
-    btns.push(`<button class="action-btn btn-activo" onclick="cambiarEstado('${p.id}','activo')">↩ Reabrir</button>`);
-  }
-  return btns.join("");
-}
-
-async function cambiarEstado(id, nuevoEstado) {
-  try {
-    const r = await fetch(`/api/pedidos/${id}/estado`, {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ pw: PW, estado: nuevoEstado })
-    });
-    const data = await r.json();
-    if (data.ok) {
-      // Actualizar en memoria
-      const idx = todosLosPedidos.findIndex(p => p.id === id);
-      if (idx !== -1) todosLosPedidos[idx] = data.pedido;
-      actualizar();
-
-      const msgs = {
-        preparando: "🔵 Pedido en preparación",
-        enviado:    "🟢 Cliente notificado — pedido enviado",
-        entregado:  "✅ Marcado como entregado",
-        activo:     "↩ Pedido reabierto",
-      };
-      toast(msgs[nuevoEstado] || "Estado actualizado");
+async function cargarPedidos() {
+    try {
+        const response = await fetch(`/api/pedidos?pw=${encodeURIComponent(password)}`);
+        if (!response.ok) throw new Error('No autorizado');
+        const data = await response.json();
+        renderizarPedidos(data.pedidos);
+        actualizarStats(data.pedidos);
+    } catch (error) {
+        alert('Error al cargar pedidos');
+        logout();
     }
-  } catch(e) {
-    toast("⚠️ Error al actualizar");
-  }
 }
 
-function setFiltro(f, btn) {
-  filtroActual = f;
-  document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
-  btn.classList.add("active");
-  actualizar();
+function renderizarPedidos(pedidos) {
+    const container = document.getElementById('pedidos-container');
+    const emptyState = document.getElementById('empty-state');
+    
+    if (pedidos.length === 0) {
+        container.innerHTML = '';
+        emptyState.style.display = 'block';
+        return;
+    }
+    emptyState.style.display = 'none';
+    
+    container.innerHTML = pedidos.map(p => `
+        <div class="pedido-card">
+            <div class="pedido-header">
+                <div>
+                    <div class="pedido-id">#${p.id}</div>
+                    <div class="pedido-hora">🕐 ${p.hora}</div>
+                </div>
+            </div>
+            
+            <div class="pedido-tipo">${p.tipo === 'domicilio' ? '🛵 Domicilio' : '🏠 Recoger'}</div>
+            
+            <div class="pedido-cliente">📱 ${p.numero}</div>
+            <div class="pedido-direccion">📍 ${p.direccion}</div>
+            
+            <div class="pedido-resumen">${p.resumen}</div>
+            
+            ${p.modificaciones && p.modificaciones.length > 0 ? `
+                <div class="modificaciones">
+                    <strong>📝 Modificaciones:</strong><br>
+                    ${p.modificaciones.join('<br>')}
+                </div>
+            ` : ''}
+            
+            ${p.quejas && p.quejas.length > 0 ? `
+                <div class="quejas">
+                    <strong>⚠️ Quejas:</strong><br>
+                    ${p.quejas.join('<br>')}
+                </div>
+            ` : ''}
+            
+            ${p.cambios_platos && p.cambios_platos.length > 0 ? `
+                <div class="cambios-platos">
+                    <strong>🔄 Cambios de Platos:</strong><br>
+                    ${p.cambios_platos.join('<br>')}
+                </div>
+            ` : ''}
+            
+            <div>
+                <label>Estado:</label>
+                <select class="estado-select" onchange="cambiarEstado('${p.id}', this.value)">
+                    <option value="activo" ${p.estado === 'activo' ? 'selected' : ''}>Activo</option>
+                    <option value="preparando" ${p.estado === 'preparando' ? 'selected' : ''}>Preparando</option>
+                    <option value="enviado" ${p.estado === 'enviado' ? 'selected' : ''}>Enviado</option>
+                    <option value="entregado" ${p.estado === 'entregado' ? 'selected' : ''}>Entregado</option>
+                    <option value="cancelado" ${p.estado === 'cancelado' ? 'selected' : ''}>Cancelado</option>
+                </select>
+            </div>
+            
+            <div style="text-align: center; margin-top: 10px;">
+                <span class="estado-badge estado-${p.estado}">${p.estado.toUpperCase()}</span>
+            </div>
+        </div>
+    `).join('');
 }
 
-function toast(msg) {
-  const el = document.getElementById("toast");
-  el.textContent = msg;
-  el.classList.add("show");
-  setTimeout(() => el.classList.remove("show"), 2800);
+async function cambiarEstado(pedidoId, nuevoEstado) {
+    try {
+        const response = await fetch(`/api/pedidos/${pedidoId}/estado`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pw: password, estado: nuevoEstado })
+        });
+        if (!response.ok) throw new Error('Error al cambiar estado');
+        cargarPedidos();
+    } catch (error) {
+        alert('Error al cambiar estado');
+    }
 }
 
-// Cargar al inicio y cada 15 segundos
-cargar();
-intervalo = setInterval(cargar, 15000);
+function actualizarStats(pedidos) {
+    const ahora = new Date().toLocaleTimeString('es-CO');
+    document.getElementById('tiempo-actual').textContent = `🕐 ${ahora}`;
+    document.getElementById('total-pedidos').textContent = `📊 Total: ${pedidos.length}`;
+    const activos = pedidos.filter(p => p.estado === 'activo' || p.estado === 'preparando').length;
+    document.getElementById('pedidos-activos').textContent = `⚡ Activos: ${activos}`;
+}
+
+// Recargar cada 5 segundos
+setInterval(cargarPedidos, 5000);
 </script>
 </body>
 </html>
 """
 
-# ── PANEL WEB ────────────────────────────────────────────────────────────────
 
-@app.get("/panel", response_class=HTMLResponse)
-async def panel_pedidos(request: Request, pw: str = ""):
-    if pw != PANEL_PASSWORD:
-        return HTMLResponse("""
-<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sabores de Nariño</title>
-<style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  body{min-height:100vh;display:flex;align-items:center;justify-content:center;
-       background:#1a1a1a;font-family:'Segoe UI',sans-serif}
-  .box{background:#242424;border:1px solid #333;border-radius:16px;padding:40px;
-       width:320px;text-align:center}
-  h1{color:#f5a623;font-size:1.4rem;margin-bottom:6px}
-  p{color:#888;font-size:.85rem;margin-bottom:24px}
-  input{width:100%;padding:12px 16px;background:#1a1a1a;border:1px solid #444;
-        border-radius:10px;color:#fff;font-size:1rem;outline:none;margin-bottom:12px}
+@app.get("/")
+async def raiz():
+    return HTMLResponse(
+        """<html><body><h1>Bot de Sabores de Nariño</h1>
+        <p>Sistema operativo. Accede a /panel para ver pedidos.</p></body></html>""")
+
+
+@app.get("/panel")
+async def panel(pw: str = ""):
+    if pw and pw == PANEL_PASSWORD:
+        html = PANEL_HTML.replace("{{PANEL_PASSWORD}}", PANEL_PASSWORD)
+        return HTMLResponse(html)
+
+    return HTMLResponse("""<html><head><meta charset="utf-8"><style>
+  body{background:#1a1a1a;font-family:'Segoe UI';display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+  .box{background:#2d2d2d;border:2px solid #f5a623;padding:30px;border-radius:10px;text-align:center;color:#fff}
+  h1{color:#f5a623;margin-bottom:5px}
+  p{color:#aaa;margin-bottom:20px}
+  input{width:100%;padding:12px;background:#1a1a1a;border:1px solid #f5a623;border-radius:10px;color:#fff;font-size:1rem;outline:none;margin-bottom:12px}
   input:focus{border-color:#f5a623}
   button{width:100%;padding:12px;background:#f5a623;border:none;border-radius:10px;
          color:#1a1a1a;font-weight:700;font-size:1rem;cursor:pointer}
@@ -781,7 +651,7 @@ async def cambiar_estado(pedido_id: str, request: Request):
     if pw != PANEL_PASSWORD:
         raise HTTPException(status_code=403, detail="No autorizado")
 
-    estados_validos = ["activo", "preparando", "enviado", "entregado"]
+    estados_validos = ["activo", "preparando", "enviado", "entregado", "cancelado"]
     if nuevo_estado not in estados_validos:
         raise HTTPException(status_code=400, detail="Estado inválido")
 
@@ -815,6 +685,34 @@ async def cambiar_estado(pedido_id: str, request: Request):
             f"🙌 *¡Pedido entregado!* Esperamos que lo disfrutes.\n"
             f"¡Gracias por elegirnos! Vuelve pronto 😊"
         )
+    
+    # Notificar al cliente cuando pasa a "cancelado"
+    if nuevo_estado == "cancelado" and estado_anterior != "cancelado":
+        enviar_whatsapp(
+            pedido["numero"],
+            f"❌ *Pedido #{pedido['id']} cancelado.*\n"
+            f"Si tienes dudas, contáctanos.\n"
+            f"¡Esperamos verte pronto! 🍔"
+        )
+
+    return {"ok": True, "pedido": pedido}
+
+
+@app.post("/api/pedidos/{pedido_id}/modificacion")
+async def agregar_modificacion(pedido_id: str, request: Request):
+    body = await request.json()
+    pw = body.get("pw", "")
+    modificacion = body.get("modificacion", "")
+
+    if pw != PANEL_PASSWORD:
+        raise HTTPException(status_code=403, detail="No autorizado")
+
+    pedido = next((p for p in pedidos if p["id"] == pedido_id), None)
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+
+    pedido["modificaciones"].append(modificacion)
+    enviar_whatsapp(pedido["numero"], f"📝 Tu pedido #{pedido_id} tiene una modificación: {modificacion}")
 
     return {"ok": True, "pedido": pedido}
 
@@ -889,6 +787,47 @@ async def recibir_mensaje(request: Request):
                 "Nuestro horario es de *1:00pm a 11:00pm*. ¡Te esperamos pronto! 🍔")
             return {"status": "ok"}
 
+        # ─── OPCIONES ESPECIALES DE CLIENTE ─────────────────────────────────
+        texto_lower = texto.lower()
+        
+        # Eliminar/Cancelar pedido
+        if any(word in texto_lower for word in ["eliminar pedido", "cancelar pedido", "quiero eliminar", "cancela mi pedido"]):
+            pedido = buscar_pedido_cliente(numero)
+            if pedido:
+                pedido["estado"] = "cancelado"
+                enviar_whatsapp(numero, f"❌ Tu pedido #{pedido['id']} ha sido cancelado.\nSi cambias de idea, ¡escríbenos! 🍔")
+                enviar_whatsapp(ADMIN_NUMBER, f"⚠️ Pedido #{pedido['id']} cancelado por cliente +{numero}")
+            else:
+                enviar_whatsapp(numero, "No encontramos un pedido activo para cancelar. ¿Deseas hacer un nuevo pedido?")
+            return {"status": "ok"}
+        
+        # Modificar pedido
+        if any(word in texto_lower for word in ["modificar pedido", "cambiar plato", "quiero cambiar", "agregar algo"]):
+            pedido = buscar_pedido_cliente(numero)
+            if pedido:
+                if "modificaciones" not in pedido:
+                    pedido["modificaciones"] = []
+                pedido["modificaciones"].append(texto)
+                enviar_whatsapp(numero, f"✅ Hemos recibido tu solicitud de cambio.\n📝 Tu mensaje fue registrado.\n¡Nuestro equipo lo procesará! 🍔")
+                enviar_whatsapp(ADMIN_NUMBER, f"📝 MODIFICACIÓN Pedido #{pedido['id']}:\n+{numero}\n{texto}")
+            else:
+                enviar_whatsapp(numero, "No encontramos un pedido activo. ¿Deseas hacer un nuevo pedido?")
+            return {"status": "ok"}
+        
+        # Quejas o cambios de platos
+        if any(word in texto_lower for word in ["queja", "reclamación", "problema", "cambio de plato", "está mal", "no me gusta"]):
+            pedido = buscar_pedido_cliente(numero)
+            if pedido:
+                if "quejas" not in pedido:
+                    pedido["quejas"] = []
+                pedido["quejas"].append(texto)
+                enviar_whatsapp(numero, f"⚠️ Hemos recibido tu reclamación.\n👨‍💼 Nuestro equipo se pondrá en contacto contigo pronto.\n¡Disculpas! 😟")
+                enviar_whatsapp(ADMIN_NUMBER, f"⚠️ QUEJA/RECLAMO Pedido #{pedido['id']}:\n+{numero}\n{texto}")
+            else:
+                enviar_whatsapp(numero, "Cuéntanos qué pasó para que podamos ayudarte mejor 😊")
+            return {"status": "ok"}
+
+        # ─── CONVERSACIÓN NORMAL DE PEDIDO ──────────────────────────────────
         # Claude
         if numero not in historial:
             historial[numero] = []
