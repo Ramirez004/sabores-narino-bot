@@ -146,6 +146,8 @@ MENÚ:
 {chr(10).join(menu_activo)}
 {notas}{espera_txt}
 
+Si el cliente pide ver "el menú", "la carta" o "el pdf", NO se lo describas tú: el sistema ya le envía automáticamente el PDF del menú antes de que tú respondas. Si ya se lo enviaron, simplemente continúa la conversación con normalidad.
+
 INSTRUCCIONES CRÍTICAS PARA MANEJO DEL PEDIDO:
 - Habla amigable y natural como empleado real.
 - Acumula TODOS los productos que el cliente pide sin mostrar resumen parcial.
@@ -171,6 +173,49 @@ def enviar_whatsapp(numero, mensaje):
     r = requests.post(url, headers=headers, json=data)
     print("META →", r.status_code, r.text)
     return r
+
+
+def enviar_documento_whatsapp(numero, url_documento, nombre_archivo, caption=""):
+    """Envía un documento (ej. PDF) por WhatsApp a partir de un link público https."""
+    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
+    documento = {"link": url_documento, "filename": nombre_archivo}
+    if caption:
+        documento["caption"] = caption
+    data = {"messaging_product": "whatsapp", "to": numero, "type": "document", "document": documento}
+    r = requests.post(url, headers=headers, json=data)
+    print("META (documento) →", r.status_code, r.text)
+    return r
+
+
+def enviar_menu_pdf(numero):
+    """Envía el menú en PDF si existe static/menu.pdf y PANEL_URL está configurado.
+    Intenta mandarlo como documento adjunto Y, sin depender de que eso funcione,
+    siempre manda también el link directo como texto (WhatsApp lo muestra como
+    un enlace tocable). Así el cliente siempre puede ver el menú aunque el envío
+    de documento falle por restricciones de la cuenta de WhatsApp Business.
+    Devuelve True si se pudo enviar algo, False si faltó el archivo o la URL."""
+    ruta_pdf = os.path.join(STATIC_DIR, "menu.pdf")
+    base_url = os.getenv("PANEL_URL", "").rstrip("/")
+
+    if not os.path.exists(ruta_pdf) or not base_url:
+        enviar_whatsapp(numero, "📋 Por ahora puedo contarte el menú aquí mismo, ¡pregúntame lo que quieras! 😊")
+        return False
+
+    url_pdf = f"{base_url}/static/menu.pdf"
+
+    # Intento 1: como documento adjunto (mejor experiencia si funciona)
+    enviar_documento_whatsapp(numero, url_pdf, "Menu-Broaster-King.pdf", caption="📋 Aquí tienes nuestro menú completo")
+
+    # Intento 2 (siempre): el link directo como texto, que SIEMPRE funciona
+    # porque es un mensaje de texto normal, sin depender de que Meta pueda
+    # descargar y reempaquetar el archivo como documento.
+    enviar_whatsapp(
+        numero,
+        f"📋 *Menú completo:*\n{url_pdf}\n\n👉 Toca el link para verlo o descargarlo"
+    )
+    return True
+
 
 
 def notificar_pedido_admin(numero_cliente, pedido):
@@ -212,6 +257,27 @@ def notificar_pedido_actualizado_admin(numero_cliente, pedido):
 def procesar_comando_admin(texto):
     global domicilio_activo, tiempo_espera
     t = texto.strip().lower()
+
+    if t in ["ayuda", "help", "comandos", "ayuda admin", "menu admin", "menú admin", "que puedo hacer", "qué puedo hacer"]:
+        categorias = ", ".join(menu.keys())
+        return (
+            "🛠️ *Comandos disponibles (admin)*\n\n"
+            "*Domicilio:*\n"
+            "• quita domicilio — lo desactiva\n"
+            "• activa domicilio — lo reactiva\n\n"
+            "*Tiempo de espera:*\n"
+            "• espera 30 — avisa 30 min de espera a los clientes\n"
+            "• sin espera — quita el aviso\n\n"
+            "*Categorías del menú:*\n"
+            "• quita [categoría] — ej: quita aves\n"
+            "• activa [categoría] — ej: activa combos\n"
+            f"Categorías disponibles: {categorias}\n\n"
+            "*Notas del día:*\n"
+            "• nota [texto] — ej: nota no hay pollo hoy\n"
+            "• borra notas — limpia todas las notas\n\n"
+            "*Ayuda:*\n"
+            "• ayuda — muestra este mensaje"
+        )
 
     if t in ["quita domicilio", "desactiva domicilio", "sin domicilio", "no hay domicilio"]:
         domicilio_activo = False
@@ -855,6 +921,13 @@ async def recibir_mensaje(request: Request):
                     enviar_whatsapp(ADMIN_NUMBER, f"⚠️ *QUEJA - Pedido #{pedido['id']}*\n📱 +{numero}\n{texto}")
                 else:
                     enviar_whatsapp(numero, "Cuéntanos qué pasó para que podamos ayudarte mejor 😊")
+                return {"status": "ok"}
+
+            # ENVIAR MENÚ EN PDF
+            if any(p in texto_lower for p in ["pdf", "carta", "el menú", "el menu", "menú completo", "menu completo", "ver el menú", "ver el menu"]):
+                enviado = enviar_menu_pdf(numero)
+                if enviado:
+                    enviar_whatsapp(numero, "¿Qué te gustaría pedir? 😊")
                 return {"status": "ok"}
 
             # ─── ¿TIENE UN PEDIDO ACTIVO RECIENTE Y ESCRIBE ALGO AMBIGUO? ────
