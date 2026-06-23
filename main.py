@@ -24,6 +24,7 @@ mensajes_procesados = set()
 # ── PEDIDOS ─────────────────────────────────────────────────────────────────
 pedidos = []
 
+
 def registrar_pedido(numero_cliente, resumen, confirmacion_bot):
     """Crea un pedido nuevo en la lista al detectar cierre de conversación."""
     es_domicilio = "camino" in confirmacion_bot.lower() or "domicilio" in confirmacion_bot.lower()
@@ -58,12 +59,14 @@ def registrar_pedido(numero_cliente, resumen, confirmacion_bot):
         pedidos.pop(0)
     return pedido
 
+
 def buscar_pedido_cliente(numero_cliente):
-    """Busca el último pedido activo de un cliente."""
+    """Busca el último pedido activo (o preparando) de un cliente."""
     for p in reversed(pedidos):
         if p["numero"] == numero_cliente and p["estado"] in ["activo", "preparando"]:
             return p
     return None
+
 
 # ── MENÚ ─────────────────────────────────────────────────────────────────────
 menu = {
@@ -82,9 +85,11 @@ notas_admin = []
 domicilio_activo = True
 tiempo_espera = None
 
+
 def esta_abierto():
     ahora = datetime.now(ZONA_HORARIA)
     return 13 <= ahora.hour < 23
+
 
 def build_system_prompt():
     menu_activo = [v for k, v in menu.items() if k not in categorias_desactivadas]
@@ -109,13 +114,17 @@ INSTRUCCIONES CRÍTICAS PARA MANEJO DEL PEDIDO:
 - Acumula TODOS los productos que el cliente pide sin mostrar resumen parcial.
 - NUNCA muestres resumen ni total hasta que el cliente diga "es todo", "eso sería", "listo", "ya es todo", "nada más" o similar.
 - Solo entonces muestra el resumen completo con todos los productos y el total.
-- Luego pregunta: ¿Es para domicilio o para recoger en el local?
-- Si domicilio: pide la dirección. Al recibirla confirma con exactamente: "Perfecto, domicilio a [dirección]. Tu pedido ya está en camino 🛵"
-- Si recoger: confirma con: "Perfecto, tu pedido estará listo para recoger en Cra 7 #6-43 🍔"
-- No repitas el resumen ni el total después de pedir/confirmar la dirección.
+
+INSTRUCCIONES SOBRE LA DIRECCIÓN (MUY IMPORTANTE):
+- Si el cliente YA mencionó en cualquier parte de la conversación un lugar de entrega (edificio, casa, barrio, calle, conjunto residencial, punto de referencia — ejemplo: "para el edificio IPK", "en mi casa del barrio X", "a la calle 5"), eso significa que el pedido es DOMICILIO y esa es la dirección. NO preguntes "¿es domicilio o para recoger?" ni vuelvas a pedir la dirección: ya la tienes.
+- En ese caso, al cerrar el pedido confirma directamente con exactamente: "Perfecto, domicilio a [la dirección que mencionó el cliente]. Tu pedido ya está en camino 🛵"
+- Solo si el cliente NO ha mencionado ningún lugar de entrega, pregunta: "¿Es para domicilio o para recoger en el local?". Si responde domicilio y aún no diste dirección, ahí sí pídela.
+- Si es para recoger, confirma con: "Perfecto, tu pedido estará listo para recoger en Cra 7 #6-43 🍔"
+- No repitas el resumen ni el total después de confirmar.
 - No inventes productos ni precios. Si no sabes algo, sugiere llamar.
 - Si quiere hablar con persona real, dile que lo comunicas con el equipo.
 - Responde siempre en español. Sé conciso."""
+
 
 def enviar_whatsapp(numero, mensaje):
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
@@ -124,6 +133,7 @@ def enviar_whatsapp(numero, mensaje):
     r = requests.post(url, headers=headers, json=data)
     print("META →", r.status_code, r.text)
     return r
+
 
 def notificar_pedido_admin(numero_cliente, pedido):
     """Notifica al admin por WhatsApp con los detalles del pedido."""
@@ -141,6 +151,7 @@ def notificar_pedido_admin(numero_cliente, pedido):
         f"👉 Ver panel: {os.getenv('PANEL_URL', 'Tu URL de Railway')}/panel"
     )
     enviar_whatsapp(ADMIN_NUMBER, mensaje)
+
 
 def procesar_comando_admin(texto):
     global domicilio_activo, tiempo_espera
@@ -189,7 +200,44 @@ def procesar_comando_admin(texto):
 
     return None
 
-# ── PANEL HTML ───────────────────────────────────────────────────────────────
+
+# ── PANEL: PÁGINA DE LOGIN (solo se ve si la contraseña no se ha validado) ──
+
+LOGIN_HTML = """<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sabores de Nariño - Login</title>
+<style>
+  *{box-sizing:border-box}
+  body{background:#1a1a1a;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+  .box{background:#2d2d2d;border:2px solid #f5a623;padding:30px;border-radius:10px;text-align:center;color:#fff;width:90%;max-width:360px}
+  h1{color:#f5a623;margin-bottom:5px}
+  p{color:#aaa;margin-bottom:20px}
+  input{width:100%;padding:12px;background:#1a1a1a;border:1px solid #f5a623;border-radius:10px;color:#fff;font-size:1rem;outline:none;margin-bottom:12px}
+  input:focus{border-color:#f5a623}
+  button{width:100%;padding:12px;background:#f5a623;border:none;border-radius:10px;color:#1a1a1a;font-weight:700;font-size:1rem;cursor:pointer}
+  button:hover{background:#e09510}
+  .error{color:#f44336;font-size:0.85rem;margin-top:-5px;margin-bottom:10px;display:none}
+</style></head><body>
+<div class="box">
+  <h1>🍔 Sabores de Nariño</h1>
+  <p>Panel de pedidos</p>
+  <div class="error" id="error-msg">❌ Contraseña incorrecta</div>
+  <form id="login-form" autocomplete="on">
+    <input type="password" id="pw" name="password" placeholder="Contraseña" autocomplete="current-password" autofocus>
+    <button type="submit">Entrar</button>
+  </form>
+</div>
+<script>
+document.getElementById('login-form').addEventListener('submit', function(e){
+    e.preventDefault();
+    const pw = document.getElementById('pw').value;
+    window.location.href = '/panel?pw=' + encodeURIComponent(pw);
+});
+</script>
+</body></html>"""
+
+
+# ── PANEL: DASHBOARD (se sirve solo cuando la contraseña en la URL es correcta) ──
 
 PANEL_HTML = """<!DOCTYPE html>
 <html lang="es">
@@ -200,205 +248,234 @@ PANEL_HTML = """<!DOCTYPE html>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1a1a1a; color: #fff; padding: 20px; min-height: 100vh; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #f5a623; padding-bottom: 20px; }
-        h1 { font-size: 2rem; color: #f5a623; margin-bottom: 10px; }
-        .header-info { display: flex; justify-content: center; gap: 20px; margin-top: 10px; font-size: 0.9rem; color: #ccc; }
-        .pedidos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
-        .pedido-card { background: #2d2d2d; border-left: 4px solid #f5a623; border-radius: 8px; padding: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
-        .pedido-id { font-size: 1.2rem; font-weight: bold; color: #f5a623; }
-        .pedido-hora { font-size: 0.8rem; color: #aaa; margin-top: 3px; }
-        .pedido-tipo { display: inline-block; background: #f5a623; color: #1a1a1a; padding: 3px 8px; border-radius: 3px; font-size: 0.75rem; font-weight: bold; margin-top: 8px; }
-        .pedido-cliente { font-size: 0.85rem; color: #ccc; margin: 8px 0; }
-        .pedido-direccion { font-size: 0.8rem; color: #aaa; margin: 5px 0; }
-        .pedido-resumen { background: #1a1a1a; padding: 8px; border-radius: 4px; font-size: 0.75rem; color: #ddd; margin: 10px 0; max-height: 100px; overflow-y: auto; border-left: 3px solid #f5a623; }
-        .estado-select { width: 100%; padding: 6px; background: #1a1a1a; border: 1px solid #f5a623; border-radius: 4px; color: #fff; margin: 10px 0; cursor: pointer; font-size: 0.8rem; }
-        .estado-badge { display: inline-block; padding: 3px 10px; border-radius: 3px; font-size: 0.75rem; font-weight: bold; margin-top: 8px; }
-        .estado-activo { background: #4CAF50; color: #fff; }
-        .estado-preparando { background: #FF9800; color: #fff; }
-        .estado-enviado { background: #2196F3; color: #fff; }
-        .estado-entregado { background: #9C27B0; color: #fff; }
-        .estado-cancelado { background: #f44336; color: #fff; }
-        .modificaciones { background: #1a1a1a; padding: 8px; border-radius: 4px; margin: 8px 0; font-size: 0.75rem; border-left: 3px solid #FF9800; color: #ddd; }
-        .quejas { background: #1a1a1a; padding: 8px; border-radius: 4px; margin: 8px 0; font-size: 0.75rem; border-left: 3px solid #f44336; color: #ddd; }
-        button { background: #f5a623; border: none; color: #1a1a1a; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.8rem; margin: 3px 0; width: 100%; }
-        button:hover { background: #e09510; }
-        .logout-btn { background: #f44336; color: white; padding: 8px 16px; border-radius: 4px; border: none; cursor: pointer; float: right; margin-top: 0; width: auto; }
+        .container { max-width: 1300px; margin: 0 auto; }
+        header { margin-bottom: 25px; border-bottom: 2px solid #f5a623; padding-bottom: 15px; }
+        .header-top { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+        h1 { font-size: 1.6rem; color: #f5a623; }
+        .header-buttons { display: flex; gap: 10px; }
+        .btn-refrescar { background: #2196F3; color: #fff; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 0.9rem; }
+        .btn-refrescar:hover { background: #1976D2; }
+        .btn-refrescar.girando { animation: girar 0.6s linear; }
+        @keyframes girar { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .logout-btn { background: #f44336; color: white; padding: 10px 18px; border-radius: 6px; border: none; cursor: pointer; font-weight: bold; font-size: 0.9rem; }
         .logout-btn:hover { background: #d32f2f; }
-        .login-box { background: #2d2d2d; border: 2px solid #f5a623; border-radius: 10px; padding: 40px; max-width: 400px; margin: 100px auto; text-align: center; }
-        .login-box h1 { font-size: 1.8rem; margin-bottom: 20px; }
-        .login-box input { width: 100%; padding: 12px; background: #1a1a1a; border: 1px solid #f5a623; border-radius: 6px; color: #fff; font-size: 0.9rem; margin-bottom: 12px; }
-        .login-box button { width: 100%; padding: 12px; margin-top: 0; }
-        .empty-state { text-align: center; padding: 40px; color: #aaa; }
+        .header-info { display: flex; gap: 20px; margin-top: 12px; font-size: 0.85rem; color: #ccc; flex-wrap: wrap; }
+        .pedidos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; }
+        .pedido-card { background: #2d2d2d; border-left: 4px solid #f5a623; border-radius: 8px; padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+        .pedido-id { font-size: 1.15rem; font-weight: bold; color: #f5a623; }
+        .pedido-hora { font-size: 0.8rem; color: #aaa; margin-top: 2px; }
+        .pedido-tipo { display: inline-block; background: #f5a623; color: #1a1a1a; padding: 3px 9px; border-radius: 3px; font-size: 0.75rem; font-weight: bold; margin-top: 8px; }
+        .pedido-cliente { font-size: 0.85rem; color: #ccc; margin: 8px 0 2px; }
+        .pedido-direccion { font-size: 0.8rem; color: #aaa; margin: 2px 0 8px; word-break: break-word; }
+        .pedido-resumen { background: #1a1a1a; padding: 8px; border-radius: 4px; font-size: 0.78rem; color: #ddd; margin: 8px 0; max-height: 110px; overflow-y: auto; border-left: 3px solid #f5a623; white-space: pre-wrap; }
+        .modificaciones, .quejas { padding: 8px; border-radius: 4px; margin: 8px 0; font-size: 0.75rem; color: #ddd; background: #1a1a1a; }
+        .modificaciones { border-left: 3px solid #FF9800; }
+        .quejas { border-left: 3px solid #f44336; }
+
+        .estado-select { width: 100%; padding: 6px; background: #1a1a1a; border: 1px solid #555; border-radius: 4px; color: #fff; margin: 10px 0 8px; cursor: pointer; font-size: 0.78rem; }
+
+        .badge-row { display: flex; justify-content: center; margin-bottom: 10px; }
+        .estado-badge { display: inline-flex; align-items: center; gap: 5px; padding: 5px 14px; border-radius: 20px; font-size: 0.78rem; font-weight: bold; }
+        .estado-activo    { background: #4CAF50; color: #fff; }
+        .estado-preparando{ background: #FF9800; color: #fff; }
+        .estado-enviado   { background: #2196F3; color: #fff; }
+        .estado-entregado { background: #9C27B0; color: #fff; box-shadow: 0 0 0 2px #9C27B0 inset; }
+        .estado-cancelado { background: #f44336; color: #fff; }
+
+        .btn-accion { width: 100%; padding: 10px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 0.85rem; color: #fff; }
+        .btn-preparar { background: #FF9800; }
+        .btn-preparar:hover { background: #e08600; }
+        .btn-enviar { background: #2196F3; }
+        .btn-enviar:hover { background: #1976D2; }
+        .btn-entregar { background: #9C27B0; }
+        .btn-entregar:hover { background: #7B1FA2; }
+        .accion-final { text-align: center; padding: 10px; border-radius: 6px; font-weight: bold; font-size: 0.85rem; }
+        .accion-final.entregado { background: rgba(156,39,176,0.15); color: #CE93D8; border: 1px solid #9C27B0; }
+        .accion-final.cancelado { background: rgba(244,67,54,0.15); color: #EF9A9A; border: 1px solid #f44336; }
+
+        .empty-state { text-align: center; padding: 60px 20px; color: #aaa; font-size: 1rem; }
     </style>
 </head>
 <body>
 <div class="container">
-    <header id="header" style="display: none;">
-        <h1>🍔 Sabores de Nariño - Panel de Pedidos</h1>
-        <button class="logout-btn" onclick="logout()">Cerrar sesión</button>
+    <header>
+        <div class="header-top">
+            <h1>🍔 Sabores de Nariño - Panel de Pedidos</h1>
+            <div class="header-buttons">
+                <button class="btn-refrescar" id="btn-refrescar" onclick="actualizarTodo()">🔄 Actualizar todo</button>
+                <button class="logout-btn" onclick="logout()">Cerrar sesión</button>
+            </div>
+        </div>
         <div class="header-info">
-            <span id="tiempo-actual"></span>
-            <span id="total-pedidos"></span>
-            <span id="pedidos-activos"></span>
+            <span id="tiempo-actual">🕐 --:--</span>
+            <span id="total-pedidos">📊 Total: 0</span>
+            <span id="pedidos-activos">⚡ Activos: 0</span>
         </div>
     </header>
-    
-    <div id="login-section" class="login-box">
-        <h1>🍔 Sabores de Nariño</h1>
-        <p style="margin-bottom: 20px; color: #aaa;">Panel de pedidos</p>
-        <input type="password" id="pw" placeholder="Contraseña" onkeydown="if(event.key==='Enter')login()">
-        <button onclick="login()">Entrar</button>
-    </div>
-    
-    <div id="pedidos-section" style="display: none;">
-        <div id="pedidos-container" class="pedidos-grid"></div>
-        <div id="empty-state" class="empty-state" style="display: none;">No hay pedidos aún</div>
-    </div>
+
+    <div id="pedidos-container" class="pedidos-grid"></div>
+    <div id="empty-state" class="empty-state" style="display:none;">No hay pedidos aún</div>
 </div>
 
 <script>
-let password = '';
+const password = "{{PANEL_PASSWORD}}";
 
-function login(){
-    const pw=document.getElementById('pw').value;
-    password=pw;
-    cargarPedidos();
-    document.getElementById('login-section').style.display='none';
-    document.getElementById('header').style.display='block';
-    document.getElementById('pedidos-section').style.display='block';
+function logout() {
+    window.location.href = '/panel';
 }
 
-function logout(){
-    password='';
-    document.getElementById('login-section').style.display='block';
-    document.getElementById('header').style.display='none';
-    document.getElementById('pedidos-section').style.display='none';
-    document.getElementById('pw').value='';
-}
-
-async function cargarPedidos(){
-    try{
-        const response=await fetch(`/api/pedidos?pw=${encodeURIComponent(password)}`);
-        if(!response.ok) throw new Error('No autorizado');
-        const data=await response.json();
+async function cargarPedidos() {
+    try {
+        const response = await fetch(`/api/pedidos?pw=${encodeURIComponent(password)}`);
+        if (!response.ok) {
+            if (response.status === 403) { logout(); return; }
+            throw new Error('HTTP ' + response.status);
+        }
+        const data = await response.json();
         renderizarPedidos(data.pedidos);
         actualizarStats(data.pedidos);
-    }catch(error){
-        alert('Error al cargar pedidos');
-        logout();
+    } catch (error) {
+        console.error('Error al cargar pedidos:', error);
     }
 }
 
-function renderizarPedidos(pedidos){
-    const container=document.getElementById('pedidos-container');
-    const emptyState=document.getElementById('empty-state');
-    
-    if(pedidos.length===0){
-        container.innerHTML='';
-        emptyState.style.display='block';
+function actualizarTodo() {
+    const btn = document.getElementById('btn-refrescar');
+    btn.classList.add('girando');
+    cargarPedidos().finally(() => {
+        setTimeout(() => btn.classList.remove('girando'), 400);
+    });
+}
+
+function badgeEstado(estado) {
+    const mapa = {
+        activo:     '🆕 Activo',
+        preparando: '🍳 Preparando',
+        enviado:    '🛵 Enviado',
+        entregado:  '✅ Entregado',
+        cancelado:  '❌ Cancelado',
+    };
+    return `<span class="estado-badge estado-${estado}">${mapa[estado] || estado}</span>`;
+}
+
+function accionRapida(estado, id) {
+    if (estado === 'activo') {
+        return `<button class="btn-accion btn-preparar" onclick="cambiarEstado('${id}','preparando')">🍳 Empezar a preparar</button>`;
+    }
+    if (estado === 'preparando') {
+        return `<button class="btn-accion btn-enviar" onclick="cambiarEstado('${id}','enviado')">🛵 Marcar como enviado</button>`;
+    }
+    if (estado === 'enviado') {
+        return `<button class="btn-accion btn-entregar" onclick="cambiarEstado('${id}','entregado')">✅ Marcar como entregado</button>`;
+    }
+    if (estado === 'entregado') {
+        return `<div class="accion-final entregado">✅ Pedido completado</div>`;
+    }
+    if (estado === 'cancelado') {
+        return `<div class="accion-final cancelado">❌ Pedido cancelado</div>`;
+    }
+    return '';
+}
+
+function renderizarPedidos(pedidos) {
+    const container = document.getElementById('pedidos-container');
+    const emptyState = document.getElementById('empty-state');
+
+    if (pedidos.length === 0) {
+        container.innerHTML = '';
+        emptyState.style.display = 'block';
         return;
     }
-    emptyState.style.display='none';
-    
-    container.innerHTML=pedidos.map(p=>`
+    emptyState.style.display = 'none';
+
+    container.innerHTML = pedidos.map(p => `
         <div class="pedido-card">
             <div class="pedido-id">#${p.id}</div>
             <div class="pedido-hora">🕐 ${p.hora}</div>
-            <div class="pedido-tipo">${p.tipo==='domicilio'?'🛵 Domicilio':'🏠 Recoger'}</div>
+            <div class="pedido-tipo">${p.tipo === 'domicilio' ? '🛵 Domicilio' : '🏠 Recoger'}</div>
             <div class="pedido-cliente">📱 ${p.numero}</div>
             <div class="pedido-direccion">📍 ${p.direccion}</div>
             <div class="pedido-resumen">${p.resumen}</div>
-            
-            ${p.modificaciones && p.modificaciones.length>0?`
-                <div class="modificaciones"><strong>📝 Cambios:</strong><br>${p.modificaciones.join('<br>')}</div>
-            `:''}
-            
-            ${p.quejas && p.quejas.length>0?`
+
+            ${p.modificaciones && p.modificaciones.length > 0 ? `
+                <div class="modificaciones"><strong>📝 Modificaciones del cliente:</strong><br>${p.modificaciones.join('<br>')}</div>
+            ` : ''}
+
+            ${p.quejas && p.quejas.length > 0 ? `
                 <div class="quejas"><strong>⚠️ Quejas:</strong><br>${p.quejas.join('<br>')}</div>
-            `:''}
-            
-            <select class="estado-select" onchange="cambiarEstado('${p.id}',this.value)">
-                <option value="activo" ${p.estado==='activo'?'selected':''}>Activo</option>
-                <option value="preparando" ${p.estado==='preparando'?'selected':''}>Preparando</option>
-                <option value="enviado" ${p.estado==='enviado'?'selected':''}>Enviado</option>
-                <option value="entregado" ${p.estado==='entregado'?'selected':''}>Entregado</option>
-                <option value="cancelado" ${p.estado==='cancelado'?'selected':''}>Cancelado</option>
+            ` : ''}
+
+            <div class="badge-row">${badgeEstado(p.estado)}</div>
+
+            ${accionRapida(p.estado, p.id)}
+
+            <select class="estado-select" onchange="cambiarEstado('${p.id}', this.value)">
+                <option value="" disabled selected>Cambiar manualmente...</option>
+                <option value="activo" ${p.estado === 'activo' ? 'selected' : ''}>Activo</option>
+                <option value="preparando" ${p.estado === 'preparando' ? 'selected' : ''}>Preparando</option>
+                <option value="enviado" ${p.estado === 'enviado' ? 'selected' : ''}>Enviado</option>
+                <option value="entregado" ${p.estado === 'entregado' ? 'selected' : ''}>Entregado</option>
+                <option value="cancelado" ${p.estado === 'cancelado' ? 'selected' : ''}>Cancelado</option>
             </select>
-            <div style="text-align:center;margin-top:8px;">
-                <span class="estado-badge estado-${p.estado}">${p.estado.toUpperCase()}</span>
-            </div>
         </div>
     `).join('');
 }
 
-async function cambiarEstado(pedidoId,nuevoEstado){
-    try{
-        const response=await fetch(`/api/pedidos/${pedidoId}/estado`,{
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({pw:password,estado:nuevoEstado})
+async function cambiarEstado(pedidoId, nuevoEstado) {
+    try {
+        const response = await fetch(`/api/pedidos/${pedidoId}/estado`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pw: password, estado: nuevoEstado })
         });
-        if(!response.ok) throw new Error('Error');
+        if (!response.ok) throw new Error('Error al cambiar estado');
         cargarPedidos();
-    }catch(error){
+    } catch (error) {
         alert('Error al cambiar estado');
     }
 }
 
-function actualizarStats(pedidos){
-    const ahora=new Date().toLocaleTimeString('es-CO');
-    document.getElementById('tiempo-actual').textContent=`🕐 ${ahora}`;
-    document.getElementById('total-pedidos').textContent=`📊 Total: ${pedidos.length}`;
-    const activos=pedidos.filter(p=>p.estado==='activo'||p.estado==='preparando').length;
-    document.getElementById('pedidos-activos').textContent=`⚡ Activos: ${activos}`;
+function actualizarStats(pedidos) {
+    const ahora = new Date().toLocaleTimeString('es-CO', {hour: '2-digit', minute:'2-digit'});
+    document.getElementById('tiempo-actual').textContent = `🕐 ${ahora}`;
+    document.getElementById('total-pedidos').textContent = `📊 Total: ${pedidos.length}`;
+    const activos = pedidos.filter(p => p.estado === 'activo' || p.estado === 'preparando').length;
+    document.getElementById('pedidos-activos').textContent = `⚡ Activos: ${activos}`;
 }
 
-setInterval(cargarPedidos,5000);
+// Carga inicial inmediata (ya estamos autenticados, la contraseña viene embebida)
+cargarPedidos();
+// Recarga automática cada 6 segundos
+setInterval(cargarPedidos, 6000);
 </script>
 </body>
 </html>
 """
 
+
 @app.get("/")
 async def raiz():
     return HTMLResponse("<html><body><h1>Bot de Sabores de Nariño</h1><p>Sistema operativo. Accede a /panel para ver pedidos.</p></body></html>")
 
+
 @app.get("/panel")
 async def panel(pw: str = ""):
+    # Si la contraseña es correcta, mostramos el dashboard YA AUTENTICADO
+    # (la contraseña queda embebida en el JS, no se vuelve a pedir).
     if pw and pw == PANEL_PASSWORD:
         html = PANEL_HTML.replace("{{PANEL_PASSWORD}}", PANEL_PASSWORD)
         return HTMLResponse(html)
 
-    return HTMLResponse("""<html><head><meta charset="utf-8"><style>
-  body{background:#1a1a1a;font-family:'Segoe UI';display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
-  .box{background:#2d2d2d;border:2px solid #f5a623;padding:30px;border-radius:10px;text-align:center;color:#fff}
-  h1{color:#f5a623;margin-bottom:5px}
-  p{color:#aaa;margin-bottom:20px}
-  input{width:100%;padding:12px;background:#1a1a1a;border:1px solid #f5a623;border-radius:10px;color:#fff;font-size:1rem;outline:none;margin-bottom:12px}
-  input:focus{border-color:#f5a623}
-  button{width:100%;padding:12px;background:#f5a623;border:none;border-radius:10px;color:#1a1a1a;font-weight:700;font-size:1rem;cursor:pointer}
-  button:hover{background:#e09510}
-</style></head><body>
-<div class="box">
-  <h1>🍔 Sabores de Nariño</h1>
-  <p>Panel de pedidos</p>
-  <input type="password" id="pw" placeholder="Contraseña" onkeydown="if(event.key==='Enter')login()">
-  <button onclick="login()">Entrar</button>
-</div>
-<script>
-function login(){
-  const pw=document.getElementById('pw').value;
-  window.location.href='/panel?pw='+encodeURIComponent(pw);
-}
-</script></body></html>
-        """, status_code=200)
+    # Si no hay contraseña o es incorrecta, mostramos el login (una sola vez)
+    return HTMLResponse(LOGIN_HTML)
+
 
 @app.get("/api/pedidos")
 async def api_pedidos(pw: str = ""):
     if pw != PANEL_PASSWORD:
         raise HTTPException(status_code=403, detail="No autorizado")
     return {"pedidos": list(reversed(pedidos))}
+
 
 @app.post("/api/pedidos/{pedido_id}/estado")
 async def cambiar_estado(pedido_id: str, request: Request):
@@ -422,18 +499,36 @@ async def cambiar_estado(pedido_id: str, request: Request):
 
     if nuevo_estado == "enviado" and estado_anterior != "enviado":
         if pedido["tipo"] == "domicilio":
-            msg = f"🛵 *¡Tu pedido va en camino!*\nPedido #{pedido['id']} ha salido hacia {pedido['direccion']}.\n¡Gracias por pedir en Sabores de Nariño! 🍔"
+            msg = (
+                f"🛵 *¡Tu pedido va en camino!*\n"
+                f"Pedido #{pedido['id']} ha salido hacia {pedido['direccion']}.\n"
+                f"¡Gracias por pedir en Sabores de Nariño! 🍔"
+            )
         else:
-            msg = f"✅ *¡Tu pedido está listo!*\nPedido #{pedido['id']} está listo para recoger en Cra 7 #6-43.\n¡Te esperamos! 🍔"
+            msg = (
+                f"✅ *¡Tu pedido está listo!*\n"
+                f"Pedido #{pedido['id']} está listo para recoger en Cra 7 #6-43.\n"
+                f"¡Te esperamos! 🍔"
+            )
         enviar_whatsapp(pedido["numero"], msg)
 
     if nuevo_estado == "entregado" and estado_anterior != "entregado":
-        enviar_whatsapp(pedido["numero"], f"🙌 *¡Pedido entregado!* Esperamos que lo disfrutes.\n¡Gracias por elegirnos! Vuelve pronto 😊")
+        enviar_whatsapp(
+            pedido["numero"],
+            f"🙌 *¡Pedido entregado!* Esperamos que lo disfrutes.\n"
+            f"¡Gracias por elegirnos! Vuelve pronto 😊"
+        )
 
     if nuevo_estado == "cancelado" and estado_anterior != "cancelado":
-        enviar_whatsapp(pedido["numero"], f"❌ *Pedido #{pedido['id']} cancelado.*\nSi tienes dudas, contáctanos.\n¡Esperamos verte pronto! 🍔")
+        enviar_whatsapp(
+            pedido["numero"],
+            f"❌ *Pedido #{pedido['id']} cancelado.*\n"
+            f"Si tienes dudas, contáctanos.\n"
+            f"¡Esperamos verte pronto! 🍔"
+        )
 
     return {"ok": True, "pedido": pedido}
+
 
 # ── WEBHOOK ──────────────────────────────────────────────────────────────────
 
@@ -443,6 +538,7 @@ async def verificar_webhook(request: Request):
     if params.get("hub.verify_token") == VERIFY_TOKEN:
         return PlainTextResponse(params.get("hub.challenge", ""))
     return PlainTextResponse("Token invalido", status_code=403)
+
 
 @app.post("/webhook")
 async def recibir_mensaje(request: Request):
@@ -494,50 +590,57 @@ async def recibir_mensaje(request: Request):
                 return {"status": "ok"}
 
         if not esta_abierto() and numero != ADMIN_NUMBER:
-            enviar_whatsapp(numero, "¡Hola! 😊 Gracias por escribirnos. Por ahora estamos cerrados.\nNuestro horario es de *1:00pm a 11:00pm*. ¡Te esperamos pronto! 🍔")
+            enviar_whatsapp(numero,
+                "¡Hola! 😊 Gracias por escribirnos. Por ahora estamos cerrados.\n"
+                "Nuestro horario es de *1:00pm a 11:00pm*. ¡Te esperamos pronto! 🍔")
             return {"status": "ok"}
 
-        # ─── OPCIONES ESPECIALES ─────────────────────────
+        # ─── OPCIONES ESPECIALES DEL CLIENTE ─────────────────────────────────
         texto_lower = texto.lower()
-        
-        # ELIMINAR PEDIDO
-        if any(word in texto_lower for word in ["eliminar pedido", "cancelar pedido", "quiero eliminar", "cancela mi pedido"]):
+
+        # ELIMINAR / CANCELAR PEDIDO
+        if any(p in texto_lower for p in ["eliminar pedido", "cancelar pedido", "quiero eliminar", "cancela mi pedido"]):
             pedido = buscar_pedido_cliente(numero)
             if pedido:
                 pedido["estado"] = "cancelado"
                 enviar_whatsapp(numero, f"❌ Tu pedido #{pedido['id']} ha sido cancelado.\nSi cambias de idea, ¡escríbenos! 🍔")
-                enviar_whatsapp(ADMIN_NUMBER, f"⚠️ Pedido #{pedido['id']} cancelado por cliente +{numero}")
+                enviar_whatsapp(ADMIN_NUMBER, f"⚠️ *Pedido #{pedido['id']} cancelado*\nCliente +{numero} canceló su pedido.")
             else:
                 enviar_whatsapp(numero, "No encontramos un pedido activo para cancelar. ¿Deseas hacer un nuevo pedido?")
             return {"status": "ok"}
-        
+
         # MODIFICAR PEDIDO
-        if any(word in texto_lower for word in ["modificar pedido", "cambiar plato", "quiero cambiar", "agregar algo"]):
+        if any(p in texto_lower for p in ["modificar pedido", "cambiar plato", "quiero cambiar", "agregar algo"]):
             pedido = buscar_pedido_cliente(numero)
             if pedido:
-                if "modificaciones" not in pedido:
-                    pedido["modificaciones"] = []
                 pedido["modificaciones"].append(texto)
-                enviar_whatsapp(numero, f"✅ Hemos recibido tu solicitud de cambio.\n📝 Nuestro equipo lo procesará! 🍔")
-                enviar_whatsapp(ADMIN_NUMBER, f"📝 MODIFICACIÓN Pedido #{pedido['id']}:\n+{numero}\n{texto}")
+                enviar_whatsapp(numero, "✅ Hemos recibido tu solicitud de cambio.\n📝 ¡Nuestro equipo lo procesará! 🍔")
+                # Notificación clara al admin de que el pedido fue modificado
+                enviar_whatsapp(
+                    ADMIN_NUMBER,
+                    f"📝 *El pedido #{pedido['id']} ha sido modificado*\n"
+                    f"📱 Cliente: +{numero}\n"
+                    f"────────────────\n"
+                    f"{texto}\n"
+                    f"────────────────\n"
+                    f"👉 Revisa el panel para más detalles."
+                )
             else:
                 enviar_whatsapp(numero, "No encontramos un pedido activo. ¿Deseas hacer un nuevo pedido?")
             return {"status": "ok"}
-        
-        # QUEJAS
-        if any(word in texto_lower for word in ["queja", "reclamación", "problema", "cambio de plato", "está mal", "no me gusta"]):
+
+        # QUEJAS / RECLAMACIONES
+        if any(p in texto_lower for p in ["queja", "reclamación", "problema", "cambio de plato", "está mal", "no me gusta"]):
             pedido = buscar_pedido_cliente(numero)
             if pedido:
-                if "quejas" not in pedido:
-                    pedido["quejas"] = []
                 pedido["quejas"].append(texto)
-                enviar_whatsapp(numero, f"⚠️ Hemos recibido tu reclamación.\n👨‍💼 Nuestro equipo se pondrá en contacto contigo pronto.\n¡Disculpas! 😟")
-                enviar_whatsapp(ADMIN_NUMBER, f"⚠️ QUEJA Pedido #{pedido['id']}:\n+{numero}\n{texto}")
+                enviar_whatsapp(numero, "⚠️ Hemos recibido tu reclamación.\n👨‍💼 Nuestro equipo se pondrá en contacto contigo pronto.\n¡Disculpas! 😟")
+                enviar_whatsapp(ADMIN_NUMBER, f"⚠️ *QUEJA - Pedido #{pedido['id']}*\n📱 +{numero}\n{texto}")
             else:
                 enviar_whatsapp(numero, "Cuéntanos qué pasó para que podamos ayudarte mejor 😊")
             return {"status": "ok"}
 
-        # ─── CONVERSACIÓN NORMAL ─────────────────────────
+        # ─── CONVERSACIÓN NORMAL CON CLAUDE ──────────────────────────────────
         if numero not in historial:
             historial[numero] = []
         historial[numero].append({"role": "user", "content": texto})
@@ -558,6 +661,7 @@ async def recibir_mensaje(request: Request):
 
         enviar_whatsapp(numero, texto_respuesta)
 
+        # Detectar cierre de pedido
         palabras_cierre = ["en camino", "ya está en camino", "listo para recoger", "pasamos a preparar", "empezamos a preparar"]
         tiene_contexto = any(p in texto_respuesta.lower() for p in ["domicilio", "recoger", "local"])
         es_cierre = any(p in texto_respuesta.lower() for p in palabras_cierre)
