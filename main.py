@@ -552,18 +552,21 @@ PANEL_HTML = """
 <div class="container">
     <header id="header" style="display: none;">
         <h1>🍔 Sabores de Nariño - Panel de Pedidos</h1>
-        <button class="logout-btn" onclick="logout()">Cerrar sesión</button>
-        <div class="header-info">
-            <span id="tiempo-actual"></span>
-            <span id="total-pedidos"></span>
-            <span id="pedidos-activos"></span>
+        <div style="position: absolute; right: 20px; top: 20px;">
+            <button onclick="cargarPedidos()" style="background: #4CAF50; color: white; padding: 10px 20px; margin-right: 10px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">🔄 Actualizar</button>
+            <button class="logout-btn" onclick="logout()">Cerrar sesión</button>
+        </div>
+        <div class="header-info" style="margin-top: 15px;">
+            <span id="tiempo-actual">🕐 --:--</span>
+            <span id="total-pedidos">📊 Total: 0</span>
+            <span id="pedidos-activos">⚡ Activos: 0</span>
         </div>
     </header>
     
     <div id="login-section" class="login-box">
         <h1>🍔 Sabores de Nariño</h1>
         <p style="margin-bottom: 20px; color: #aaa;">Panel de pedidos</p>
-        <input type="password" id="pw" placeholder="Contraseña" onkeydown="if(event.key==='Enter')login()">
+        <input type="password" id="pw" placeholder="Contraseña" autocomplete="current-password" onkeypress="if(event.key==='Enter'){event.preventDefault(); login();}" onkeydown="if(event.keyCode===13){event.preventDefault(); login();}"
         <button onclick="login()">Entrar</button>
     </div>
     
@@ -592,31 +595,71 @@ let password = '';
 
 function login() {
     const pw = document.getElementById('pw').value;
+    
+    if (!pw) {
+        alert('Por favor ingresa la contraseña');
+        return;
+    }
+    
+    console.log('[DEBUG] Intentando login...');
     password = pw;
-    cargarPedidos();
+    
+    // Mostrar UI de carga
     document.getElementById('login-section').style.display = 'none';
     document.getElementById('header').style.display = 'block';
     document.getElementById('pedidos-section').style.display = 'block';
+    
+    // Iniciar recarga automática y cargar pedidos
+    iniciarRecargaAutomatica();
 }
 
 function logout() {
+    console.log('[DEBUG] Cerrando sesión');
+    detenerRecargaAutomatica();
     password = '';
     document.getElementById('login-section').style.display = 'block';
     document.getElementById('header').style.display = 'none';
     document.getElementById('pedidos-section').style.display = 'none';
     document.getElementById('pw').value = '';
+    document.getElementById('pw').focus();
 }
 
 async function cargarPedidos() {
     try {
-        const response = await fetch(`/api/pedidos?pw=${encodeURIComponent(password)}`);
-        if (!response.ok) throw new Error('No autorizado');
+        console.log('[DEBUG] Cargando pedidos con password:', password ? '****' : 'vacío');
+        
+        if (!password) {
+            console.error('[ERROR] No hay contraseña');
+            alert('Contraseña vacía. Por favor inicia sesión.');
+            return;
+        }
+        
+        const url = `/api/pedidos?pw=${encodeURIComponent(password)}`;
+        console.log('[DEBUG] URL:', url);
+        
+        const response = await fetch(url);
+        console.log('[DEBUG] Response status:', response.status);
+        
+        if (!response.ok) {
+            console.error('[ERROR] Response no OK:', response.status, response.statusText);
+            if (response.status === 403) {
+                alert('❌ Contraseña incorrecta. Sesión cerrada.');
+                logout();
+            } else {
+                alert('❌ Error al cargar pedidos: ' + response.statusText);
+            }
+            return;
+        }
+        
         const data = await response.json();
+        console.log('[DEBUG] Pedidos recibidos:', data.pedidos.length);
+        
         renderizarPedidos(data.pedidos);
         actualizarStats(data.pedidos);
+        console.log('[SUCCESS] Pedidos cargados correctamente');
     } catch (error) {
-        alert('Error al cargar pedidos');
-        logout();
+        console.error('[ERROR] Excepción en cargarPedidos:', error);
+        alert('❌ Error al cargar pedidos:\n' + error.message);
     }
 }
 
@@ -715,15 +758,47 @@ async function cambiarEstado(pedidoId, nuevoEstado) {
 }
 
 function actualizarStats(pedidos) {
-    const ahora = new Date().toLocaleTimeString('es-CO');
-    document.getElementById('tiempo-actual').textContent = `🕐 ${ahora}`;
-    document.getElementById('total-pedidos').textContent = `📊 Total: ${pedidos.length}`;
+    const ahora = new Date();
+    const horas = String(ahora.getHours()).padStart(2, '0');
+    const minutos = String(ahora.getMinutes()).padStart(2, '0');
+    
+    const tiempoActual = `🕐 ${horas}:${minutos}`;
+    const totalPedidos = `📊 Total: ${pedidos.length}`;
     const activos = pedidos.filter(p => p.estado === 'activo' || p.estado === 'preparando').length;
-    document.getElementById('pedidos-activos').textContent = `⚡ Activos: ${activos}`;
+    const pedidosActivos = `⚡ Activos: ${activos}`;
+    
+    const tiempoEl = document.getElementById('tiempo-actual');
+    const totalEl = document.getElementById('total-pedidos');
+    const activosEl = document.getElementById('pedidos-activos');
+    
+    if (tiempoEl) tiempoEl.textContent = tiempoActual;
+    if (totalEl) totalEl.textContent = totalPedidos;
+    if (activosEl) activosEl.textContent = pedidosActivos;
+    
+    console.log('[DEBUG]', tiempoActual, totalPedidos, pedidosActivos);
 }
 
-// Recargar cada 5 segundos
-setInterval(cargarPedidos, 5000);
+// Recargar cada 5 segundos SOLO si estamos en la sección de pedidos
+let intervaloRecarga = null;
+
+function iniciarRecargaAutomatica() {
+    if (intervaloRecarga) clearInterval(intervaloRecarga);
+    console.log('[DEBUG] Iniciando recarga automática cada 5 segundos');
+    cargarPedidos(); // Primera carga inmediata
+    intervaloRecarga = setInterval(() => {
+        if (document.getElementById('pedidos-section').style.display !== 'none') {
+            console.log('[DEBUG] Recargando pedidos automáticamente');
+            cargarPedidos();
+        }
+    }, 5000);
+}
+
+function detenerRecargaAutomatica() {
+    if (intervaloRecarga) {
+        clearInterval(intervaloRecarga);
+        console.log('[DEBUG] Deteniendo recarga automática');
+    }
+}
 
 // MODAL PARA AGREGAR MODIFICACIONES
 let modalActual = { pedidoId: null, tipo: null };
@@ -768,9 +843,20 @@ function cerrarModal() {
 async function guardarModificacion() {
     const texto = document.getElementById('modal-texto').value.trim();
     if (!texto) {
-        alert('Escribe algo');
+        alert('Escribe algo antes de guardar');
         return;
     }
+    
+    if (!modalActual.pedidoId || !modalActual.tipo) {
+        alert('Error: faltan datos del pedido');
+        return;
+    }
+    
+    console.log('[DEBUG] Guardando modificación:', {
+        pedidoId: modalActual.pedidoId,
+        tipo: modalActual.tipo,
+        texto: texto.substring(0, 50) + '...'
+    });
     
     try {
         const response = await fetch(`/api/pedidos/${modalActual.pedidoId}/modificacion`, {
@@ -783,23 +869,37 @@ async function guardarModificacion() {
             })
         });
         
-        if (!response.ok) throw new Error('Error al guardar');
+        console.log('[DEBUG] Response status:', response.status);
         
-        // Mensaje de éxito
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(`HTTP ${response.status}: ${error}`);
+        }
+        
+        const result = await response.json();
+        console.log('[SUCCESS] Modificación guardada:', result);
+        
+        // Mostrar mensaje de éxito
         const msgExito = document.getElementById('modal-exito-msg');
         msgExito.style.display = 'block';
         setTimeout(() => {
             msgExito.style.display = 'none';
         }, 2000);
         
-        // Limpiar y cargar
+        // Limpiar input
         document.getElementById('modal-texto').value = '';
-        cargarPedidos();
         
-        // Auto-cerrar modal después de un segundo
-        setTimeout(cerrarModal, 1000);
+        // Cerrar modal después de un segundo
+        setTimeout(() => {
+            cerrarModal();
+            // Recargar pedidos inmediatamente
+            console.log('[DEBUG] Recargando pedidos después de guardar');
+            cargarPedidos();
+        }, 500);
+        
     } catch (error) {
-        alert('Error: ' + error.message);
+        console.error('[ERROR] Error al guardar:', error);
+        alert('❌ Error al guardar:\n' + error.message);
     }
 }
 
@@ -807,6 +907,16 @@ async function guardarModificacion() {
 document.addEventListener('keydown', function(event) {
     if (event.key === 'Escape') {
         cerrarModal();
+    }
+});
+
+// Enfocar password al cargar
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('[DEBUG] Página cargada');
+    const pwInput = document.getElementById('pw');
+    if (pwInput) {
+        pwInput.focus();
+        console.log('[DEBUG] Password input enfocado');
     }
 });
 </script>
