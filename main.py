@@ -9,11 +9,16 @@ import pytz
 load_dotenv()
 
 app = FastAPI()
+
+# Carpeta para archivos estáticos (aquí va el logo: static/logo.png)
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+os.makedirs(STATIC_DIR, exist_ok=True)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 CLAUDE_KEY = os.getenv("CLAUDE_KEY")
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
-PANEL_PASSWORD = os.getenv("PANEL_PASSWORD", "sabores2024")
+PANEL_PASSWORD = os.getenv("PANEL_PASSWORD", "broaster2024")
 
 ADMIN_NUMBER = "573167731698"
 ZONA_HORARIA = pytz.timezone("America/Bogota")
@@ -104,14 +109,12 @@ def buscar_pedido_cliente(numero_cliente):
 
 # ── MENÚ ─────────────────────────────────────────────────────────────────────
 menu = {
-    "hamburguesas": "Hamburguesas: Sencilla $16.000 / Doble Carne $24.000 / Especial $22.000 / Mixta $26.000 / Ranchera $28.000",
-    "perros": "Perros: Sencillo $10.000 / Especial $14.000 / Ranchero $17.000",
-    "salchipapas": "Salchipapas: Sencilla $13.000 / Especial $18.000 / Mixta $22.000 / Trifásica $28.000",
-    "mazorcadas": "Mazorcadas: Sencilla $16.000 / Mixta $22.000 / Especial $28.000",
-    "burritos": "Burritos y Sándwiches: Burrito Pollo $18.000 / Burrito Mixto $21.000 / Sándwich Pollo $15.000 / Sándwich Especial $19.000",
-    "otros": "Otros: Papas Pequeñas $7.000 / Papas Grandes $11.000 / Nuggets 8und $14.000 / Choripapa $18.000 / Patacón Mixto $22.000",
-    "bebidas": "Bebidas: Gaseosa 250ml $3.000 / 400ml $4.500 / 1.5L $8.000 / Agua $3.000 / Té Frío $4.000 / Jugo Agua $5.000 / Jugo Leche $7.000 / Limonada $5.000 / Malteada $9.000 / Café $3.500",
-    "combos": "Combos: Hamburguesa Sencilla+Papas+Gaseosa $24.000 / Hamburguesa Especial+Papas+Gaseosa $30.000 / Perro Especial+Papas+Gaseosa $22.000 / Salchipapa Especial+Gaseosa $21.000 / Burrito Mixto+Gaseosa $27.000",
+    "sopas": "Sopas: Consomé, caldo de pollo con menudencias $7.000 / Consomé Especial, caldo con pollo desmechado $8.000 / Sopa de Pollo, sopa de pollo con presa $13.000",
+    "varios": "Varios: Hamburguesa de pollo o de res + papas fritas $17.000 / Plato de Chorizo, 2 chorizos + papas fritas + ensalada $12.000 / Plato de Salchichas, papas fritas + ensalada $12.000 / Salchipapa Sencilla $10.000 / Salchipapa Doble $17.000 / Extras, porción de papa, arroz o ensalada $7.000 / Cajita Feliz, 1 presa + papas fritas + juguete + jugo $19.000",
+    "bebidas": "Bebidas: Jugo 237ml $4.000 / Jarra de Limonada $16.000 / Media Jarra de Limonada $9.000 / Jugo Natural en Leche $7.000 / Jugo Natural en Agua $6.000 / Jugo del Valle 250ml $3.000 / Jugo Hit 500ml $5.000 / Jugo Hit 946ml $8.000 / Vaso Limonada Natural $4.000 / Malteada $7.000 / Gaseosa 1 Litro $8.000 / Gaseosa Familiar $12.000 / Gaseosa Personal $4.000 / Pony Malta Litro $8.000 / Pony Malta 350ml $4.000 / Té 550ml $5.000 / Té Litro $8.000 / Cerveza en Lata $8.000 / Agua Botella $4.000 / Agua Guitig $5.000 / Agua H2O $4.000",
+    "aves": "Aves: 1 Pollo, 8 presas + papas fritas $54.000 / Medio Pollo, 4 presas + papas fritas $27.000 / Senior, 3 presas + papas fritas $23.000 / Estándar, 2 presas + papas fritas $14.000 / Junior, 1 presa + papas fritas $8.000 / Arroz con Pollo, papas fritas + ensalada $16.000 / Estándar con Arroz, 2 presas + papas fritas + ensalada $19.000 / Junior con Arroz, 1 presa + papas fritas + ensalada $17.000 / Plato Mixto, 1 presa + 1 chorizo + 1 salchicha + arroz + papas fritas + ensalada $25.000 / Pollo Picado, papas fritas + patacón + crispeta $80.000 / Medio Pollo Picado, papas fritas + patacón + crispeta $60.000",
+    "especiales": "Especiales: Picada Broaster, pollo + chorizo + salchicha + papas fritas + patacón + crispeta $90.000 / Media Picada Broaster $70.000 / Picada Personal $30.000 / Alitas B.B.Q., papas fritas + ensalada $25.000 / Costillas B.B.Q., papas fritas + ensalada $26.000 / Media Costillas B.B.Q., papas fritas + ensalada $17.000 / Crispetas de Pollo, papas fritas $18.000 / Chuleta de Cerdo, papas fritas + arroz + ensalada $25.000 / Media Chuleta de Cerdo, papas fritas + arroz + ensalada $16.000 / Chuleta de Pollo, papas fritas + arroz + ensalada $25.000 / Media Chuleta de Pollo, papas fritas + arroz + ensalada $16.000 / Pechuga a la Plancha, papas fritas + arroz + ensalada $25.000",
+    "combos": "Combos: Combo 1, 12 presas + papas fritas + arroz + ensalada + gaseosa 1L $100.000 / Combo 2, 8 presas + papas fritas + arroz + ensalada + gaseosa 1L $80.000 / Combo 3, 4 presas + papas fritas + ensalada + media jarra de limonada $50.000 / Combo 4, 3 presas + papas fritas + ensalada + limonada $45.000 / Combo 5, consomé + 2 presas + arroz + papas fritas + ensalada + limonada $24.000 / Combo 6, consomé + 1 presa + papas fritas + arroz + ensalada + limonada $21.000",
 }
 
 categorias_desactivadas = set()
@@ -135,7 +138,7 @@ def build_system_prompt():
         "No disponible. Solo atención en local."
     )
 
-    return f"""Eres el asistente virtual de Sabores de Nariño, comidas rápidas en Cra 7 #6-43, Ipiales.
+    return f"""Eres el asistente virtual de Broaster King Ipiales, restaurante de especialidades en pollo broaster, ubicado en Cra. 7ma #12-05, Ipiales. Teléfonos: 602 773 3214 - 773 8827 / Cel: 312 861 4485.
 HORARIO: 1:00pm – 11:00pm
 DOMICILIO: {domicilio_txt}
 MÉTODOS DE PAGO: Nequi, Daviplata, transferencia, efectivo.
@@ -154,7 +157,7 @@ INSTRUCCIONES SOBRE LA DIRECCIÓN (MUY IMPORTANTE):
 - En ese caso, antes de cerrar el pedido, confirma esa dirección y pregunta si hay algún detalle adicional, así: "Perfecto, te lo enviamos al Edificio IPK 🛵 ¿Hay algún detalle adicional (apartamento, torre, punto de referencia) o así está bien?". Espera la respuesta del cliente.
 - Una vez el cliente confirme (diga "así está bien", "correcto", o dé un detalle extra como el apartamento/torre), NO vuelvas a preguntar la dirección. Cierra el pedido con exactamente: "Perfecto, domicilio a [dirección + detalle si lo dio]. Tu pedido ya está en camino 🛵"
 - Solo si el cliente NO ha mencionado ningún lugar de entrega, pregunta: "¿Es para domicilio o para recoger en el local?". Si responde domicilio y aún no diste dirección, ahí sí pídela completa.
-- Si es para recoger, confirma con: "Perfecto, tu pedido estará listo para recoger en Cra 7 #6-43 🍔"
+- Si es para recoger, confirma con: "Perfecto, tu pedido estará listo para recoger en Cra. 7ma #12-05, Ipiales 🍔"
 - No repitas el resumen ni el total después de confirmar.
 - No inventes productos ni precios. Si no sabes algo, sugiere llamar.
 - Si quiere hablar con persona real, dile que lo comunicas con el equipo.
@@ -258,22 +261,30 @@ def procesar_comando_admin(texto):
 
 LOGIN_HTML = """<!DOCTYPE html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sabores de Nariño - Login</title>
+<title>Broaster King Ipiales - Login</title>
 <style>
   *{box-sizing:border-box}
-  body{background:#1a1a1a;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
-  .box{background:#2d2d2d;border:2px solid #f5a623;padding:30px;border-radius:10px;text-align:center;color:#fff;width:90%;max-width:360px}
-  h1{color:#f5a623;margin-bottom:5px}
-  p{color:#aaa;margin-bottom:20px}
-  input{width:100%;padding:12px;background:#1a1a1a;border:1px solid #f5a623;border-radius:10px;color:#fff;font-size:1rem;outline:none;margin-bottom:12px}
-  input:focus{border-color:#f5a623}
-  button{width:100%;padding:12px;background:#f5a623;border:none;border-radius:10px;color:#1a1a1a;font-weight:700;font-size:1rem;cursor:pointer}
-  button:hover{background:#e09510}
+  body{background:#FFF8E7;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;color:#2b2b2b}
+  .box{background:#fff;border:1px solid #FFE2A8;box-shadow:0 8px 28px rgba(0,0,0,0.08);padding:34px 30px;border-radius:16px;text-align:center;width:90%;max-width:360px}
+  .logo-box{width:72px;height:72px;margin:0 auto 14px;border-radius:16px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#FFF3D6;border:2px dashed #FFC107}
+  .logo-box img{width:100%;height:100%;object-fit:contain;display:none}
+  .logo-box .logo-fallback{font-size:0.6rem;font-weight:700;letter-spacing:.5px;color:#C98A00}
+  h1{color:#2b2b2b;margin-bottom:2px;font-size:1.3rem;letter-spacing:.3px}
+  h1 span{color:#F57C00}
+  p{color:#9a8a6b;margin-bottom:22px;font-size:0.88rem}
+  input{width:100%;padding:13px;background:#FFFBF2;border:1px solid #FFE2A8;border-radius:10px;color:#2b2b2b;font-size:1rem;outline:none;margin-bottom:14px}
+  input:focus{border-color:#FFC107;box-shadow:0 0 0 3px rgba(255,193,7,0.18)}
+  button{width:100%;padding:13px;background:linear-gradient(135deg,#FFC107,#F57C00);border:none;border-radius:10px;color:#1a1a1a;font-weight:700;font-size:1rem;cursor:pointer;letter-spacing:.3px}
+  button:hover{filter:brightness(1.05)}
   .error{color:#f44336;font-size:0.85rem;margin-top:-5px;margin-bottom:10px;display:none}
 </style></head><body>
 <div class="box">
-  <h1>🍔 Sabores de Nariño</h1>
-  <p>Panel de pedidos</p>
+  <div class="logo-box">
+    <img id="logo-img" src="/static/logo.png" alt="Logo">
+    <span class="logo-fallback" id="logo-fallback">LOGO</span>
+  </div>
+  <h1>🍗 BROASTER <span>KING</span></h1>
+  <p>Panel de pedidos · Ipiales</p>
   <div class="error" id="error-msg">❌ Contraseña incorrecta</div>
   <form id="login-form" autocomplete="on">
     <input type="password" id="pw" name="password" placeholder="Contraseña" autocomplete="current-password" autofocus>
@@ -286,6 +297,9 @@ document.getElementById('login-form').addEventListener('submit', function(e){
     const pw = document.getElementById('pw').value;
     window.location.href = '/panel?pw=' + encodeURIComponent(pw);
 });
+const logoImg = document.getElementById('logo-img');
+logoImg.onload = () => { logoImg.style.display = 'block'; document.getElementById('logo-fallback').style.display = 'none'; };
+logoImg.onerror = () => { logoImg.style.display = 'none'; };
 </script>
 </body></html>"""
 
@@ -297,52 +311,77 @@ PANEL_HTML = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Panel de Pedidos - Sabores de Nariño</title>
+    <title>Panel de Pedidos - Broaster King Ipiales</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1a1a1a; color: #fff; padding: 20px; min-height: 100vh; }
+        :root {
+            --bk-amarillo: #FFC107;
+            --bk-amarillo-fuerte: #FFA000;
+            --bk-naranja: #F57C00;
+            --bk-negro: #222018;
+            --bk-crema: #FFFBF2;
+            --bk-crema-borde: #FFE2A8;
+            --bk-gris: #8a7f6a;
+        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bk-crema); color: var(--bk-negro); padding: 20px; min-height: 100vh; }
         .container { max-width: 1300px; margin: 0 auto; }
-        header { margin-bottom: 20px; border-bottom: 2px solid #f5a623; padding-bottom: 15px; }
-        .header-top { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
-        h1 { font-size: 1.6rem; color: #f5a623; }
+
+        header { margin-bottom: 20px; background: linear-gradient(135deg, var(--bk-amarillo), var(--bk-naranja)); border-radius: 14px; padding: 16px 20px; box-shadow: 0 4px 16px rgba(245,124,0,0.25); }
+        .header-top { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+        .header-titulo { display: flex; align-items: center; gap: 12px; }
+        .logo-box { width: 48px; height: 48px; border-radius: 12px; background: rgba(255,255,255,0.55); border: 2px dashed rgba(34,32,24,0.35); display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }
+        .logo-box img { width: 100%; height: 100%; object-fit: contain; display: none; }
+        .logo-box .logo-fallback { font-size: 0.55rem; font-weight: 700; color: rgba(34,32,24,0.55); }
+        h1 { font-size: 1.4rem; color: var(--bk-negro); letter-spacing: .3px; line-height: 1.2; }
+        h1 .sub { display: block; font-size: 0.72rem; font-weight: 400; color: rgba(34,32,24,0.65); }
         .header-buttons { display: flex; gap: 10px; }
-        .btn-refrescar { background: #2196F3; color: #fff; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 0.9rem; }
-        .btn-refrescar:hover { background: #1976D2; }
+        .btn-refrescar { background: var(--bk-negro); color: #fff; border: none; padding: 10px 18px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.85rem; }
+        .btn-refrescar:hover { background: #3a362c; }
         .btn-refrescar.girando .icono-refresh { display: inline-block; animation: girar 0.6s linear; }
         @keyframes girar { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        .logout-btn { background: #f44336; color: white; padding: 10px 18px; border-radius: 6px; border: none; cursor: pointer; font-weight: bold; font-size: 0.9rem; }
-        .logout-btn:hover { background: #d32f2f; }
-        .header-info { display: flex; gap: 20px; margin-top: 12px; font-size: 0.85rem; color: #ccc; flex-wrap: wrap; }
+        .logout-btn { background: rgba(34,32,24,0.85); color: white; padding: 10px 18px; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; font-size: 0.85rem; }
+        .logout-btn:hover { background: var(--bk-negro); }
+        .header-info { display: flex; gap: 18px; margin-top: 12px; font-size: 0.82rem; color: rgba(34,32,24,0.75); flex-wrap: wrap; font-weight: 600; }
+
+        /* RESUMEN DE VENTAS DEL DÍA */
+        .ventas-dia { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 18px 0; }
+        .venta-card { background: #fff; border-radius: 12px; padding: 14px 16px; text-align: center; border: 1px solid var(--bk-crema-borde); }
+        .venta-card .venta-numero { display: block; font-size: 1.5rem; font-weight: bold; color: var(--bk-negro); }
+        .venta-card .venta-label { display: block; font-size: 0.75rem; color: var(--bk-gris); margin-top: 4px; }
+        .venta-card.venta-total { background: var(--bk-negro); border-color: var(--bk-negro); }
+        .venta-card.venta-total .venta-numero { color: var(--bk-amarillo); font-size: 1.7rem; }
+        .venta-card.venta-total .venta-label { color: rgba(255,255,255,0.65); }
+        .venta-card.venta-cancelados .venta-numero { color: #d32f2f; }
 
         /* PESTAÑAS */
         .tabs { display: flex; gap: 8px; margin: 18px 0; flex-wrap: wrap; }
-        .tab-btn { background: #2d2d2d; color: #ccc; border: 1px solid #444; padding: 9px 16px; border-radius: 20px; cursor: pointer; font-size: 0.85rem; font-weight: bold; transition: all .15s; }
-        .tab-btn:hover { border-color: #f5a623; color: #fff; }
-        .tab-btn.tab-activo { background: #f5a623; color: #1a1a1a; border-color: #f5a623; }
+        .tab-btn { background: #fff; color: var(--bk-gris); border: 1px solid var(--bk-crema-borde); padding: 9px 16px; border-radius: 20px; cursor: pointer; font-size: 0.85rem; font-weight: bold; transition: all .15s; }
+        .tab-btn:hover { border-color: var(--bk-amarillo-fuerte); color: var(--bk-negro); }
+        .tab-btn.tab-activo { background: linear-gradient(135deg, var(--bk-amarillo), var(--bk-naranja)); color: var(--bk-negro); border-color: var(--bk-naranja); }
 
         .pedidos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; }
-        .pedido-card { background: #2d2d2d; border-left: 4px solid #f5a623; border-radius: 8px; padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
-        .pedido-id { font-size: 1.15rem; font-weight: bold; color: #f5a623; }
-        .pedido-hora { font-size: 0.8rem; color: #aaa; margin-top: 2px; }
-        .pedido-tipo { display: inline-block; background: #f5a623; color: #1a1a1a; padding: 3px 9px; border-radius: 3px; font-size: 0.75rem; font-weight: bold; margin-top: 8px; }
-        .pedido-cliente { font-size: 0.85rem; color: #ccc; margin: 8px 0 2px; }
-        .pedido-direccion { font-size: 0.8rem; color: #aaa; margin: 2px 0 8px; word-break: break-word; }
-        .pedido-resumen { background: #1a1a1a; padding: 8px; border-radius: 4px; font-size: 0.78rem; color: #ddd; margin: 8px 0; max-height: 110px; overflow-y: auto; border-left: 3px solid #f5a623; white-space: pre-wrap; }
-        .modificaciones, .quejas { padding: 8px; border-radius: 4px; margin: 8px 0; font-size: 0.75rem; color: #ddd; background: #1a1a1a; }
-        .modificaciones { border-left: 3px solid #FF9800; }
-        .quejas { border-left: 3px solid #f44336; }
+        .pedido-card { background: #fff; border-left: 4px solid var(--bk-naranja); border-radius: 10px; padding: 16px; box-shadow: 0 2px 10px rgba(34,32,24,0.07); }
+        .pedido-id { font-size: 1.15rem; font-weight: bold; color: var(--bk-naranja); }
+        .pedido-hora { font-size: 0.8rem; color: var(--bk-gris); margin-top: 2px; }
+        .pedido-tipo { display: inline-block; background: var(--bk-amarillo); color: var(--bk-negro); padding: 3px 9px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; margin-top: 8px; }
+        .pedido-cliente { font-size: 0.85rem; color: #555; margin: 8px 0 2px; }
+        .pedido-direccion { font-size: 0.8rem; color: var(--bk-gris); margin: 2px 0 8px; word-break: break-word; }
+        .pedido-resumen { background: var(--bk-crema); padding: 8px; border-radius: 6px; font-size: 0.78rem; color: #444; margin: 8px 0; max-height: 110px; overflow-y: auto; border-left: 3px solid var(--bk-amarillo); white-space: pre-wrap; }
+        .modificaciones, .quejas { padding: 8px; border-radius: 6px; margin: 8px 0; font-size: 0.75rem; color: #444; }
+        .modificaciones { background: #FFF6E0; border-left: 3px solid #FF9800; }
+        .quejas { background: #FDECEA; border-left: 3px solid #f44336; }
 
         /* ESTADO: solo texto + botones, sin lista desplegable */
         .estado-label { text-align: center; font-size: 0.8rem; font-weight: bold; margin: 10px 0 6px; padding: 4px; border-radius: 4px; }
-        .estado-label.activo     { color: #4CAF50; }
-        .estado-label.preparando { color: #FF9800; }
-        .estado-label.enviado    { color: #2196F3; }
-        .estado-label.entregado  { color: #BA68C8; }
-        .estado-label.cancelado  { color: #f44336; }
+        .estado-label.activo     { color: #2E7D32; }
+        .estado-label.preparando { color: #E65100; }
+        .estado-label.enviado    { color: #1565C0; }
+        .estado-label.entregado  { color: #6A1B9A; }
+        .estado-label.cancelado  { color: #C62828; }
 
         .estado-botones { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
-        .eb { padding: 9px 0; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; background: #1a1a1a; color: #666; opacity: 0.5; transition: all .15s; }
-        .eb:hover { opacity: 0.85; }
+        .eb { padding: 9px 0; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; background: var(--bk-crema); color: #b0a888; opacity: 0.7; transition: all .15s; }
+        .eb:hover { opacity: 1; }
         .eb.eb-on { opacity: 1; }
         .eb-activo.eb-on     { background: #4CAF50; color: #fff; }
         .eb-preparando.eb-on { background: #FF9800; color: #fff; }
@@ -350,14 +389,20 @@ PANEL_HTML = """<!DOCTYPE html>
         .eb-entregado.eb-on  { background: #9C27B0; color: #fff; }
         .eb-cancelado.eb-on  { background: #f44336; color: #fff; }
 
-        .empty-state { text-align: center; padding: 60px 20px; color: #aaa; font-size: 1rem; }
+        .empty-state { text-align: center; padding: 60px 20px; color: var(--bk-gris); font-size: 1rem; }
     </style>
 </head>
 <body>
 <div class="container">
     <header>
         <div class="header-top">
-            <h1>🍔 Sabores de Nariño - Panel de Pedidos</h1>
+            <div class="header-titulo">
+                <div class="logo-box">
+                    <img id="logo-img" src="/static/logo.png" alt="Logo">
+                    <span class="logo-fallback" id="logo-fallback">LOGO</span>
+                </div>
+                <h1>🍗 BROASTER KING<span class="sub">Panel de Pedidos · Ipiales</span></h1>
+            </div>
             <div class="header-buttons">
                 <button class="btn-refrescar" id="btn-refrescar" onclick="actualizarTodo()"><span class="icono-refresh">🔄</span> Actualizar todo</button>
                 <button class="logout-btn" onclick="logout()">Cerrar sesión</button>
@@ -369,6 +414,21 @@ PANEL_HTML = """<!DOCTYPE html>
             <span id="pedidos-activos">⚡ Activos: 0</span>
         </div>
     </header>
+
+    <div class="ventas-dia">
+        <div class="venta-card">
+            <span class="venta-numero" id="venta-cantidad">0</span>
+            <span class="venta-label">📦 Pedidos vendidos hoy</span>
+        </div>
+        <div class="venta-card venta-total">
+            <span class="venta-numero" id="venta-total">$0</span>
+            <span class="venta-label">💰 Total vendido hoy</span>
+        </div>
+        <div class="venta-card venta-cancelados">
+            <span class="venta-numero" id="venta-cancelados">0</span>
+            <span class="venta-label">❌ Cancelados hoy</span>
+        </div>
+    </div>
 
     <div class="tabs">
         <button class="tab-btn tab-activo" data-tab="todos" onclick="cambiarTab('todos')">📋 Todos <span id="cnt-todos"></span></button>
@@ -386,6 +446,11 @@ const password = "{{PANEL_PASSWORD}}";
 let pedidosActuales = [];
 let tabActual = 'todos';
 
+// Muestra el logo si ya subiste static/logo.png; si no existe, deja el placeholder "LOGO"
+const logoImg = document.getElementById('logo-img');
+logoImg.onload = () => { logoImg.style.display = 'block'; document.getElementById('logo-fallback').style.display = 'none'; };
+logoImg.onerror = () => { logoImg.style.display = 'none'; };
+
 function logout() {
     window.location.href = '/panel';
 }
@@ -402,9 +467,45 @@ async function cargarPedidos() {
         renderizarPedidos();
         actualizarStats(pedidosActuales);
         actualizarContadoresTabs(pedidosActuales);
+        actualizarVentasHoy(pedidosActuales);
     } catch (error) {
         console.error('Error al cargar pedidos:', error);
     }
+}
+
+function formatearPesos(numero) {
+    return '$' + Math.round(numero).toLocaleString('es-CO');
+}
+
+function extraerTotalPedido(resumen) {
+    // Busca un patrón como "Total: $16.000" dentro del resumen del pedido
+    if (!resumen) return 0;
+    const match = resumen.match(/Total:?\\s*\\$?\\s?([\\d.,]+)/i);
+    if (!match) return 0;
+    const limpio = match[1].replace(/[.,]/g, '');
+    return parseInt(limpio, 10) || 0;
+}
+
+function esDeHoy(horaIso) {
+    try {
+        const fechaPedido = new Date(horaIso).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' });
+        const hoy = new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota' });
+        return fechaPedido === hoy;
+    } catch (e) {
+        return false;
+    }
+}
+
+function actualizarVentasHoy(pedidos) {
+    const pedidosHoy = pedidos.filter(p => esDeHoy(p.hora_iso));
+    const vendidosHoy = pedidosHoy.filter(p => p.estado !== 'cancelado');
+    const canceladosHoy = pedidosHoy.filter(p => p.estado === 'cancelado');
+
+    const totalVentas = vendidosHoy.reduce((acc, p) => acc + extraerTotalPedido(p.resumen), 0);
+
+    document.getElementById('venta-cantidad').textContent = vendidosHoy.length;
+    document.getElementById('venta-total').textContent = formatearPesos(totalVentas);
+    document.getElementById('venta-cancelados').textContent = canceladosHoy.length;
 }
 
 function actualizarTodo() {
@@ -528,7 +629,7 @@ setInterval(cargarPedidos, 6000);
 
 @app.get("/")
 async def raiz():
-    return HTMLResponse("<html><body><h1>Bot de Sabores de Nariño</h1><p>Sistema operativo. Accede a /panel para ver pedidos.</p></body></html>")
+    return HTMLResponse("<html><body><h1>Bot de Broaster King Ipiales</h1><p>Sistema operativo. Accede a /panel para ver pedidos.</p></body></html>")
 
 
 @app.get("/panel")
@@ -575,12 +676,12 @@ async def cambiar_estado(pedido_id: str, request: Request):
             msg = (
                 f"🛵 *¡Tu pedido va en camino!*\n"
                 f"Pedido #{pedido['id']} ha salido hacia {pedido['direccion']}.\n"
-                f"¡Gracias por pedir en Sabores de Nariño! 🍔"
+                f"¡Gracias por pedir en Broaster King! 🍔"
             )
         else:
             msg = (
                 f"✅ *¡Tu pedido está listo!*\n"
-                f"Pedido #{pedido['id']} está listo para recoger en Cra 7 #6-43.\n"
+                f"Pedido #{pedido['id']} está listo para recoger en Cra. 7ma #12-05, Ipiales.\n"
                 f"¡Te esperamos! 🍔"
             )
         enviar_whatsapp(pedido["numero"], msg)
@@ -668,50 +769,107 @@ async def recibir_mensaje(request: Request):
                 "Nuestro horario es de *1:00pm a 11:00pm*. ¡Te esperamos pronto! 🍔")
             return {"status": "ok"}
 
-        # ─── OPCIONES ESPECIALES DEL CLIENTE ─────────────────────────────────
+        # ─── ¿EL CLIENTE ESTÁ RESPONDIENDO A "MODIFICAR O PEDIDO NUEVO"? ──────
         texto_lower = texto.lower()
+        saltar_palabras_clave = False
 
-        # ELIMINAR / CANCELAR PEDIDO
-        if any(p in texto_lower for p in ["eliminar pedido", "cancelar pedido", "quiero eliminar", "cancela mi pedido"]):
-            pedido = buscar_pedido_cliente(numero)
-            if pedido:
-                pedido["estado"] = "cancelado"
-                enviar_whatsapp(numero, f"❌ Tu pedido #{pedido['id']} ha sido cancelado.\nSi cambias de idea, ¡escríbenos! 🍔")
-                enviar_whatsapp(ADMIN_NUMBER, f"⚠️ *Pedido #{pedido['id']} cancelado*\nCliente +{numero} canceló su pedido.")
+        if numero in clientes_esperando_decision:
+            mensaje_original = clientes_esperando_decision.pop(numero)
+
+            quiere_modificar = any(p in texto_lower for p in
+                ["modificar", "el mismo", "modificarlo", "ese pedido", "el actual", "actualizar"])
+            quiere_nuevo = any(p in texto_lower for p in
+                ["nuevo", "otro pedido", "uno nuevo", "aparte", "diferente", "distinto"])
+
+            if quiere_modificar:
+                pedido_pendiente = buscar_pedido_cliente(numero)
+                if pedido_pendiente:
+                    pedido_pendiente["modificaciones"].append(mensaje_original)
+                    enviar_whatsapp(numero, "✅ Listo, hemos anotado ese cambio en tu pedido.\n📝 ¡Nuestro equipo lo procesará! 🍔")
+                    enviar_whatsapp(
+                        ADMIN_NUMBER,
+                        f"📝 *El pedido #{pedido_pendiente['id']} ha sido modificado*\n"
+                        f"📱 Cliente: +{numero}\n"
+                        f"────────────────\n"
+                        f"{mensaje_original}\n"
+                        f"────────────────\n"
+                        f"👉 Revisa el panel para más detalles."
+                    )
+                else:
+                    enviar_whatsapp(numero, "Tu pedido anterior ya no está activo. ¿Quieres hacer un pedido nuevo? Cuéntame qué deseas 😊")
+                return {"status": "ok"}
+
+            elif quiere_nuevo:
+                # Arrancamos una conversación nueva, separada del pedido anterior,
+                # usando el mensaje original que generó la duda.
+                historial[numero] = []
+                texto = mensaje_original
+                texto_lower = texto.lower()
+                saltar_palabras_clave = True  # ya sabemos que es un pedido nuevo, no una palabra clave
+
             else:
-                enviar_whatsapp(numero, "No encontramos un pedido activo para cancelar. ¿Deseas hacer un nuevo pedido?")
-            return {"status": "ok"}
+                # No quedó claro -> volvemos a preguntar
+                clientes_esperando_decision[numero] = mensaje_original
+                enviar_whatsapp(numero, "Disculpa, no quedó claro 😊 ¿Quieres *modificar* tu pedido actual o hacer un *pedido nuevo*? Responde 'modificar' o 'nuevo'.")
+                return {"status": "ok"}
 
-        # MODIFICAR PEDIDO
-        if any(p in texto_lower for p in ["modificar pedido", "cambiar plato", "quiero cambiar", "agregar algo"]):
-            pedido = buscar_pedido_cliente(numero)
-            if pedido:
-                pedido["modificaciones"].append(texto)
-                enviar_whatsapp(numero, "✅ Hemos recibido tu solicitud de cambio.\n📝 ¡Nuestro equipo lo procesará! 🍔")
-                # Notificación clara al admin de que el pedido fue modificado
+        # ─── OPCIONES ESPECIALES DEL CLIENTE ─────────────────────────────────
+        if not saltar_palabras_clave:
+            # ELIMINAR / CANCELAR PEDIDO
+            if any(p in texto_lower for p in ["eliminar pedido", "cancelar pedido", "quiero eliminar", "cancela mi pedido"]):
+                pedido = buscar_pedido_cliente(numero)
+                if pedido:
+                    pedido["estado"] = "cancelado"
+                    enviar_whatsapp(numero, f"❌ Tu pedido #{pedido['id']} ha sido cancelado.\nSi cambias de idea, ¡escríbenos! 🍔")
+                    enviar_whatsapp(ADMIN_NUMBER, f"⚠️ *Pedido #{pedido['id']} cancelado*\nCliente +{numero} canceló su pedido.")
+                else:
+                    enviar_whatsapp(numero, "No encontramos un pedido activo para cancelar. ¿Deseas hacer un nuevo pedido?")
+                return {"status": "ok"}
+
+            # MODIFICAR PEDIDO
+            if any(p in texto_lower for p in ["modificar pedido", "cambiar plato", "quiero cambiar", "agregar algo"]):
+                pedido = buscar_pedido_cliente(numero)
+                if pedido:
+                    pedido["modificaciones"].append(texto)
+                    enviar_whatsapp(numero, "✅ Hemos recibido tu solicitud de cambio.\n📝 ¡Nuestro equipo lo procesará! 🍔")
+                    # Notificación clara al admin de que el pedido fue modificado
+                    enviar_whatsapp(
+                        ADMIN_NUMBER,
+                        f"📝 *El pedido #{pedido['id']} ha sido modificado*\n"
+                        f"📱 Cliente: +{numero}\n"
+                        f"────────────────\n"
+                        f"{texto}\n"
+                        f"────────────────\n"
+                        f"👉 Revisa el panel para más detalles."
+                    )
+                else:
+                    enviar_whatsapp(numero, "No encontramos un pedido activo. ¿Deseas hacer un nuevo pedido?")
+                return {"status": "ok"}
+
+            # QUEJAS / RECLAMACIONES
+            if any(p in texto_lower for p in ["queja", "reclamación", "problema", "cambio de plato", "está mal", "no me gusta"]):
+                pedido = buscar_pedido_cliente(numero)
+                if pedido:
+                    pedido["quejas"].append(texto)
+                    enviar_whatsapp(numero, "⚠️ Hemos recibido tu reclamación.\n👨‍💼 Nuestro equipo se pondrá en contacto contigo pronto.\n¡Disculpas! 😟")
+                    enviar_whatsapp(ADMIN_NUMBER, f"⚠️ *QUEJA - Pedido #{pedido['id']}*\n📱 +{numero}\n{texto}")
+                else:
+                    enviar_whatsapp(numero, "Cuéntanos qué pasó para que podamos ayudarte mejor 😊")
+                return {"status": "ok"}
+
+            # ─── ¿TIENE UN PEDIDO ACTIVO RECIENTE Y ESCRIBE ALGO AMBIGUO? ────
+            # Si ya tiene un pedido activo creado hace poco y escribe de nuevo
+            # sin usar ninguna palabra clave explícita, le preguntamos qué quiere.
+            pedido_activo = buscar_pedido_cliente(numero)
+            if pedido_activo and pedido_es_reciente(pedido_activo):
+                clientes_esperando_decision[numero] = texto
                 enviar_whatsapp(
-                    ADMIN_NUMBER,
-                    f"📝 *El pedido #{pedido['id']} ha sido modificado*\n"
-                    f"📱 Cliente: +{numero}\n"
-                    f"────────────────\n"
-                    f"{texto}\n"
-                    f"────────────────\n"
-                    f"👉 Revisa el panel para más detalles."
+                    numero,
+                    f"👋 Veo que ya tienes un pedido activo (#{pedido_activo['id']}). "
+                    f"¿Quieres *modificar* ese pedido o hacer un *pedido nuevo*? "
+                    f"Responde 'modificar' o 'nuevo' 😊"
                 )
-            else:
-                enviar_whatsapp(numero, "No encontramos un pedido activo. ¿Deseas hacer un nuevo pedido?")
-            return {"status": "ok"}
-
-        # QUEJAS / RECLAMACIONES
-        if any(p in texto_lower for p in ["queja", "reclamación", "problema", "cambio de plato", "está mal", "no me gusta"]):
-            pedido = buscar_pedido_cliente(numero)
-            if pedido:
-                pedido["quejas"].append(texto)
-                enviar_whatsapp(numero, "⚠️ Hemos recibido tu reclamación.\n👨‍💼 Nuestro equipo se pondrá en contacto contigo pronto.\n¡Disculpas! 😟")
-                enviar_whatsapp(ADMIN_NUMBER, f"⚠️ *QUEJA - Pedido #{pedido['id']}*\n📱 +{numero}\n{texto}")
-            else:
-                enviar_whatsapp(numero, "Cuéntanos qué pasó para que podamos ayudarte mejor 😊")
-            return {"status": "ok"}
+                return {"status": "ok"}
 
         # ─── CONVERSACIÓN NORMAL CON CLAUDE ──────────────────────────────────
         if numero not in historial:
