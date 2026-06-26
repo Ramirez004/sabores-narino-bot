@@ -5,6 +5,7 @@ import anthropic, requests, os, traceback, uuid, re
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 import pytz
+from supabase import create_client, Client
 
 load_dotenv()
 
@@ -14,277 +15,267 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-CLAUDE_KEY = os.getenv("CLAUDE_KEY")
-WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
+CLAUDE_KEY      = os.getenv("CLAUDE_KEY")
+WHATSAPP_TOKEN  = os.getenv("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
-VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
-PANEL_PASSWORD = os.getenv("PANEL_PASSWORD", "ipiales2024")
+VERIFY_TOKEN    = os.getenv("VERIFY_TOKEN")
+PANEL_PASSWORD  = os.getenv("PANEL_PASSWORD", "ipiales2024")
+SUPABASE_URL    = os.getenv("SUPABASE_URL")
+SUPABASE_KEY    = os.getenv("SUPABASE_KEY")
 
-ADMIN_NUMBER = "573167731698"
-ZONA_HORARIA = pytz.timezone("America/Bogota")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-historial = {}
-mensajes_procesados = set()
+ADMIN_NUMBER  = "573167731698"
+ZONA_HORARIA  = pytz.timezone("America/Bogota")
+
+historial               = {}
+mensajes_procesados     = set()
 clientes_esperando_decision = {}
-# numero -> restaurante elegido
-cliente_restaurante = {}
-# numero -> True si está en proceso de elegir restaurante
-clientes_eligiendo = {}
+cliente_restaurante     = {}
+clientes_eligiendo      = {}
+# registro en pasos: numero -> {"paso": "nombre"|"direccion"}
+clientes_registrando    = {}
 
 INTERVALO_CORTO_MINUTOS = 15
 
-# ── RESTAURANTES ──────────────────────────────────────────────────────────────
-RESTAURANTES = {
-    "las_bravas": {
-        "nombre": "Las Bravas",
-        "direccion": "Cra 4 #15-32, Ipiales",
-        "hora_inicio": 13,
-        "hora_fin": 23,
-        "abierto_forzado": False,
-        "fecha_forzado": None,
+# ── SUPABASE: RESTAURANTES Y MENÚ ────────────────────────────────────────────
+# Cache en memoria para no consultar Supabase en cada mensaje
+_cache_restaurantes = {}
+_cache_menu         = {}   # restaurante_id -> [{"categoria":..,"descripcion":..,"activo":..}]
+
+def cargar_restaurantes():
+    global _cache_restaurantes
+    rows = supabase.table("restaurantes").select("*").execute().data
+    _cache_restaurantes = {r["id"]: r for r in rows}
+
+def cargar_menu():
+    global _cache_menu
+    rows = supabase.table("menu_items").select("*").execute().data
+    _cache_menu = {}
+    for item in rows:
+        rid = item["restaurante_id"]
+        _cache_menu.setdefault(rid, []).append(item)
+
+def get_restaurante(rest_key):
+    return _cache_restaurantes.get(rest_key)
+
+def get_menu(rest_key):
+    return _cache_menu.get(rest_key, [])
+
+# Carga inicial al arrancar
+cargar_restaurantes()
+cargar_menu()
+
+# Estado en memoria (domicilio forzado, espera, categorías desactivadas, notas)
+# Se resetean si Railway reinicia, pero son cosas operativas del día
+_estado_extra = {
+    key: {
         "domicilio_activo": True,
         "tiempo_espera": None,
         "categorias_desactivadas": set(),
         "notas": [],
-        "menu": {
-            "salchipapas": (
-                "Salchipapas: Sencilla $10.000 / Especial (salchicha+tocino) $14.000 / "
-                "Mixta (pollo+res) $17.000 / Trifásica (pollo+res+tocino) $22.000 / XXL $28.000"
-            ),
-            "hamburguesas": (
-                "Hamburguesas: Sencilla $15.000 / Doble Carne $22.000 / "
-                "Especial (piña+tocino) $20.000 / Ranchera (jalapeño+cebolla crispy) $25.000 / BBQ $23.000"
-            ),
-            "bebidas": (
-                "Bebidas: Gaseosa personal $3.500 / Gaseosa 400ml $5.000 / Agua $3.000 / "
-                "Jugo natural $5.000 / Limonada $4.500 / Malteada $8.000 / Té frío $4.000"
-            ),
-        },
-    },
-    "escarabajo": {
-        "nombre": "Escarabajo Burgers",
-        "direccion": "Calle 12 #7-18, Ipiales",
-        "hora_inicio": 12,
-        "hora_fin": 22,
         "abierto_forzado": False,
         "fecha_forzado": None,
-        "domicilio_activo": True,
-        "tiempo_espera": None,
-        "categorias_desactivadas": set(),
-        "notas": [],
-        "menu": {
-            "hamburguesas": (
-                "Hamburguesas: Clásica $16.000 / Doble Smash $26.000 / "
-                "Escarabajo Especial (doble carne+queso americano+salsa secreta) $28.000 / "
-                "Mushroom Swiss $24.000 / Pollo Crispy $20.000"
-            ),
-            "papas": (
-                "Papas: Papas Fritas Pequeñas $6.000 / Papas Fritas Grandes $10.000 / "
-                "Papas con Queso $12.000 / Papas con Cheddar y Tocino $15.000 / Aros de Cebolla $9.000"
-            ),
-            "combos": (
-                "Combos: Combo Clásico (Clásica+Papas+Gaseosa) $24.000 / "
-                "Combo Doble (Doble Smash+Papas Grandes+Gaseosa) $36.000 / "
-                "Combo Especial (Escarabajo Especial+Papas con Queso+Gaseosa) $38.000 / "
-                "Combo Pollo (Pollo Crispy+Papas+Gaseosa) $28.000"
-            ),
-            "gaseosas": (
-                "Gaseosas: Personal 250ml $3.500 / Mediana 400ml $5.000 / 1 Litro $8.000 / Agua $3.000"
-            ),
-        },
-    },
-    "monaco": {
-        "nombre": "Mónaco Pizzas",
-        "direccion": "Av Principal #22-45, Ipiales",
-        "hora_inicio": 17,
-        "hora_fin": 23,
-        "abierto_forzado": False,
-        "fecha_forzado": None,
-        "domicilio_activo": True,
-        "tiempo_espera": None,
-        "categorias_desactivadas": set(),
-        "notas": [],
-        "menu": {
-            "pizzas_personales": (
-                "Pizzas Personales (1 porción): Margarita $8.000 / Pepperoni $10.000 / "
-                "Hawaiana $10.000 / Cuatro Quesos $11.000 / BBQ Pollo $12.000 / "
-                "Vegetariana $10.000 / Especial Mónaco (pepperoni+champiñón+extra queso) $13.000"
-            ),
-            "pizzas_medianas": (
-                "Pizzas Medianas (4 porciones): Margarita $22.000 / Pepperoni $26.000 / "
-                "Hawaiana $26.000 / Cuatro Quesos $28.000 / BBQ Pollo $30.000 / "
-                "Vegetariana $26.000 / Especial Mónaco $32.000"
-            ),
-            "pizzas_grandes": (
-                "Pizzas Grandes (8 porciones): Margarita $38.000 / Pepperoni $44.000 / "
-                "Hawaiana $44.000 / Cuatro Quesos $48.000 / BBQ Pollo $52.000 / "
-                "Vegetariana $44.000 / Especial Mónaco $56.000"
-            ),
-            "bebidas": (
-                "Bebidas: Gaseosa personal $3.500 / Gaseosa 400ml $5.000 / "
-                "Gaseosa 1L $8.000 / Agua $3.000 / Jugo natural $5.000 / "
-                "Limonada $4.500 / Cerveza $7.000"
-            ),
-        },
-    },
+    }
+    for key in ["las_bravas", "escarabajo", "monaco"]
 }
+
+# ── CLIENTES SUPABASE ─────────────────────────────────────────────────────────
+
+def get_cliente(numero):
+    try:
+        res = supabase.table("clientes").select("*").eq("numero", numero).execute()
+        return res.data[0] if res.data else None
+    except Exception:
+        return None
+
+def crear_cliente(numero, nombre, direccion):
+    try:
+        supabase.table("clientes").insert({
+            "numero": numero,
+            "nombre": nombre,
+            "direccion": direccion,
+        }).execute()
+    except Exception:
+        traceback.print_exc()
+
+def actualizar_cliente(numero, datos):
+    try:
+        supabase.table("clientes").update(datos).eq("numero", numero).execute()
+    except Exception:
+        traceback.print_exc()
+
+# ── PEDIDOS SUPABASE ──────────────────────────────────────────────────────────
+
+def get_pedidos_activos(numero):
+    try:
+        res = supabase.table("pedidos").select("*")\
+            .eq("numero_cliente", numero)\
+            .in_("estado", ["activo", "preparando"])\
+            .order("fecha", desc=True)\
+            .execute()
+        return res.data
+    except Exception:
+        return []
+
+def get_pedido_by_id(pedido_id):
+    try:
+        res = supabase.table("pedidos").select("*").eq("id", pedido_id).execute()
+        return res.data[0] if res.data else None
+    except Exception:
+        return None
+
+def get_todos_pedidos():
+    try:
+        res = supabase.table("pedidos").select("*").order("fecha", desc=True).limit(200).execute()
+        return res.data or []
+    except Exception:
+        return []
+
+def crear_pedido(numero, resumen, confirmacion_bot, rest_key):
+    r = get_restaurante(rest_key)
+    es_domicilio = any(p in confirmacion_bot.lower() for p in ["camino", "domicilio"])
+    tipo = "domicilio" if es_domicilio else "recoger"
+    direccion = "En local"
+    if es_domicilio:
+        txt = confirmacion_bot.lower()
+        for marca in ["domicilio a", "a la dirección"]:
+            if marca in txt:
+                inicio = confirmacion_bot.lower().index(marca) + len(marca)
+                direccion = confirmacion_bot[inicio:].split(".")[0].strip()
+                break
+        if direccion == "En local":
+            direccion = "Ver resumen"
+
+    # Extraer total
+    total = 0
+    m = re.search(r"Total:?\s*\$?\s?([\d.,]+)", resumen, re.IGNORECASE)
+    if m:
+        total = int(m.group(1).replace(".", "").replace(",", "")) 
+
+    ahora = datetime.now(ZONA_HORARIA)
+
+    # ¿Ya tiene pedido activo? Lo actualiza
+    activos = get_pedidos_activos(numero)
+    if activos:
+        pedido_id = activos[0]["id"]
+        supabase.table("pedidos").update({
+            "resumen": resumen,
+            "total": total,
+            "tipo": tipo,
+            "direccion": direccion,
+            "estado": "activo",
+            "hora": ahora.strftime("%I:%M %p"),
+            "fecha": ahora.isoformat(),
+        }).eq("id", pedido_id).execute()
+        return get_pedido_by_id(pedido_id), False
+
+    pedido_id = str(uuid.uuid4())[:8].upper()
+    pedido = {
+        "id": pedido_id,
+        "numero_cliente": numero,
+        "restaurante_id": rest_key,
+        "restaurante_nombre": r["nombre"] if r else rest_key,
+        "resumen": resumen,
+        "total": total,
+        "tipo": tipo,
+        "direccion": direccion,
+        "estado": "activo",
+        "modificaciones": [],
+        "quejas": [],
+        "hora": ahora.strftime("%I:%M %p"),
+        "fecha": ahora.isoformat(),
+    }
+    supabase.table("pedidos").insert(pedido).execute()
+    return pedido, True
+
+def actualizar_estado_pedido(pedido_id, nuevo_estado):
+    supabase.table("pedidos").update({"estado": nuevo_estado}).eq("id", pedido_id).execute()
+
+def agregar_modificacion(pedido_id, texto):
+    pedido = get_pedido_by_id(pedido_id)
+    if pedido:
+        mods = pedido.get("modificaciones") or []
+        mods.append(texto)
+        supabase.table("pedidos").update({"modificaciones": mods}).eq("id", pedido_id).execute()
+
+def agregar_queja(pedido_id, texto):
+    pedido = get_pedido_by_id(pedido_id)
+    if pedido:
+        quejas = pedido.get("quejas") or []
+        quejas.append(texto)
+        supabase.table("pedidos").update({"quejas": quejas}).eq("id", pedido_id).execute()
+
+def buscar_pedido_activo_cliente(numero):
+    activos = get_pedidos_activos(numero)
+    if not activos:
+        return None
+    p = activos[0]
+    try:
+        hora_pedido = datetime.fromisoformat(p["fecha"]).replace(tzinfo=ZONA_HORARIA)
+        if (datetime.now(ZONA_HORARIA) - hora_pedido) <= timedelta(minutes=INTERVALO_CORTO_MINUTOS):
+            return p
+    except Exception:
+        return p
+    return p
 
 # ── HELPERS RESTAURANTES ──────────────────────────────────────────────────────
 
 def esta_abierto(rest_key):
-    r = RESTAURANTES[rest_key]
+    r = get_restaurante(rest_key)
+    if not r:
+        return False
+    extra = _estado_extra.get(rest_key, {})
     ahora = datetime.now(ZONA_HORARIA)
-    if r["abierto_forzado"] and r["fecha_forzado"] == ahora.date():
+    if extra.get("abierto_forzado") and extra.get("fecha_forzado") == ahora.date():
         return True
-    if r["abierto_forzado"] and r["fecha_forzado"] != ahora.date():
-        r["abierto_forzado"] = False
-        r["fecha_forzado"] = None
+    if extra.get("abierto_forzado") and extra.get("fecha_forzado") != ahora.date():
+        extra["abierto_forzado"] = False
+        extra["fecha_forzado"] = None
+    if not r.get("activo", True):
+        return False
     return r["hora_inicio"] <= ahora.hour < r["hora_fin"]
-
 
 def lista_restaurantes():
     lineas = ["🍽️ *Bienvenido a Ipiales Delivery*\n\nElige un restaurante:\n"]
-    for i, (key, r) in enumerate(RESTAURANTES.items(), 1):
+    for i, (key, r) in enumerate(_cache_restaurantes.items(), 1):
         estado = "✅ Abierto" if esta_abierto(key) else "❌ Cerrado"
         lineas.append(f"{i}. *{r['nombre']}* — {estado}\n   📍 {r['direccion']}")
-    lineas.append("\nResponde con el *número* (1, 2 o 3) para elegir.")
+    lineas.append("\nResponde con el *número* o el *nombre* del restaurante.")
     return "\n".join(lineas)
 
+def build_system_prompt(rest_key, cliente=None):
+    r = get_restaurante(rest_key)
+    extra = _estado_extra.get(rest_key, {})
+    items = get_menu(rest_key)
+    desact = extra.get("categorias_desactivadas", set())
+    menu_activo = [i["descripcion"] for i in items if i["activo"] and i["categoria"] not in desact]
+    notas = ("\nNOTAS DE HOY:\n- " + "\n- ".join(extra["notas"])) if extra.get("notas") else ""
+    espera = f"\nTIEMPO DE ESPERA: {extra['tiempo_espera']} minutos." if extra.get("tiempo_espera") else ""
+    dom = "Sí. Costo: $3.000." if extra.get("domicilio_activo", True) else "No disponible."
 
-# ── PEDIDOS ───────────────────────────────────────────────────────────────────
-pedidos = []
+    saludo = ""
+    if cliente:
+        saludo = f"\nEl cliente se llama *{cliente['nombre']}* y su dirección habitual es *{cliente['direccion']}*. Salúdalo por su nombre."
 
-
-def pedido_es_reciente(pedido):
-    try:
-        hora_pedido = datetime.fromisoformat(pedido["hora_iso"])
-        return (datetime.now(ZONA_HORARIA) - hora_pedido) <= timedelta(minutes=INTERVALO_CORTO_MINUTOS)
-    except Exception:
-        return False
-
-
-def registrar_pedido(numero_cliente, resumen, confirmacion_bot, rest_key):
-    r = RESTAURANTES[rest_key]
-    es_domicilio = any(p in confirmacion_bot.lower() for p in ["camino", "domicilio"])
-    tipo = "domicilio" if es_domicilio else "recoger"
-    direccion = ""
-    if es_domicilio:
-        texto = confirmacion_bot.lower()
-        for marca in ["domicilio a", "a la dirección"]:
-            if marca in texto:
-                inicio = confirmacion_bot.lower().index(marca) + len(marca)
-                direccion = confirmacion_bot[inicio:].split(".")[0].strip()
-                break
-    ahora = datetime.now(ZONA_HORARIA)
-    existente = buscar_pedido_cliente(numero_cliente)
-    if existente:
-        existente.update({
-            "resumen": resumen, "confirmacion": confirmacion_bot,
-            "direccion": direccion if direccion else existente["direccion"],
-            "tipo": tipo, "estado": "activo",
-            "hora": ahora.strftime("%I:%M %p"), "hora_iso": ahora.isoformat(),
-        })
-        return existente, False
-    pedido = {
-        "id": str(uuid.uuid4())[:8].upper(),
-        "numero": numero_cliente,
-        "restaurante": r["nombre"],
-        "hora": ahora.strftime("%I:%M %p"),
-        "hora_iso": ahora.isoformat(),
-        "resumen": resumen,
-        "confirmacion": confirmacion_bot,
-        "direccion": direccion if direccion else ("En local" if tipo == "recoger" else "Ver resumen"),
-        "tipo": tipo,
-        "estado": "activo",
-        "modificaciones": [],
-        "quejas": [],
-    }
-    pedidos.append(pedido)
-    if len(pedidos) > 200:
-        pedidos.pop(0)
-    return pedido, True
-
-
-def buscar_pedido_cliente(numero_cliente):
-    for p in reversed(pedidos):
-        if p["numero"] == numero_cliente and p["estado"] in ["activo", "preparando"]:
-            return p
-    return None
-
-
-# ── SYSTEM PROMPT ─────────────────────────────────────────────────────────────
-
-def build_system_prompt(rest_key):
-    r = RESTAURANTES[rest_key]
-    menu_activo = [v for k, v in r["menu"].items() if k not in r["categorias_desactivadas"]]
-    notas = ("\nNOTAS ESPECIALES DE HOY:\n- " + "\n- ".join(r["notas"])) if r["notas"] else ""
-    espera = f"\nTIEMPO DE ESPERA ACTUAL: {r['tiempo_espera']} minutos. Infórmalo al confirmar." if r["tiempo_espera"] else ""
-    domicilio_txt = (
-        "Sí. Costo: $3.000. Sin mínimo. Horario igual al de atención."
-        if r["domicilio_activo"] else
-        "No disponible. Solo atención en local."
-    )
-    return f"""Eres el asistente virtual de *{r['nombre']}*, restaurante ubicado en {r['direccion']}, Ipiales.
+    return f"""Eres el asistente virtual de *{r['nombre']}*, en {r['direccion']}, Ipiales.
 HORARIO: {r['hora_inicio']}:00 – {r['hora_fin']}:00
-DOMICILIO: {domicilio_txt}
+DOMICILIO: {dom}
 MÉTODOS DE PAGO: Nequi, Daviplata, transferencia, efectivo.
 MENÚ:
 {chr(10).join(menu_activo)}
-{notas}{espera}
+{notas}{espera}{saludo}
 
-Si el cliente pide ver "el menú" o "la carta", NO se lo describas tú: el sistema ya le envía automáticamente el menú completo antes de que tú respondas.
-
-INSTRUCCIONES CRÍTICAS PARA MANEJO DEL PEDIDO:
+INSTRUCCIONES:
 - Habla amigable y natural como empleado real de {r['nombre']}.
-- Acumula TODOS los productos que el cliente pide sin mostrar resumen parcial.
-- NUNCA muestres resumen ni total hasta que el cliente diga "es todo", "eso sería", "listo", "ya es todo", "nada más" o similar.
-- Solo entonces muestra el resumen completo con todos los productos y el total.
-
-INSTRUCCIONES SOBRE LA DIRECCIÓN (MUY IMPORTANTE):
-- Si el cliente YA mencionó en cualquier parte de la conversación un lugar de entrega, eso significa que el pedido es DOMICILIO y esa es la dirección. NO preguntes "¿es domicilio o para recoger?".
-- En ese caso, confirma esa dirección antes de cerrar el pedido.
-- Una vez el cliente confirme, cierra el pedido con: "Perfecto, domicilio a [dirección]. Tu pedido ya está en camino 🛵"
-- Solo si el cliente NO ha mencionado ningún lugar de entrega, pregunta: "¿Es para domicilio o para recoger en el local?"
-- Si es para recoger, confirma con: "Perfecto, tu pedido estará listo para recoger en {r['direccion']} 🍔"
-- No repitas el resumen ni el total después de confirmar.
-- No inventes productos ni precios. Si no sabes algo, sugiere llamar.
-- Si quiere hablar con persona real, dile que lo comunicas con el equipo.
+- Si el cliente tiene dirección guardada y pide domicilio, úsala directamente sin preguntar de nuevo.
+- Acumula todos los productos sin mostrar resumen parcial.
+- NUNCA muestres resumen ni total hasta que el cliente diga "es todo", "listo", "eso sería" o similar.
+- Solo entonces muestra resumen completo con total.
+- Si el cliente mencionó lugar de entrega, es domicilio. Confirma la dirección.
+- Cierra el pedido con: "Tu pedido ya está en camino 🛵" (domicilio) o "listo para recoger" (local).
+- No inventes productos ni precios.
 - Responde siempre en español. Sé conciso."""
-
-
-# ── NOTIFICACIONES ────────────────────────────────────────────────────────────
-
-def notificar_pedido_admin(numero_cliente, pedido):
-    icono = "🛵" if pedido["tipo"] == "domicilio" else "🏠"
-    msg = (
-        f"🛎️ *Pedido nuevo #{pedido['id']}*\n"
-        f"🍽️ Restaurante: {pedido['restaurante']}\n"
-        f"📱 Cliente: +{numero_cliente}\n"
-        f"🕐 Hora: {pedido['hora']}\n"
-        f"{icono} Tipo: {'Domicilio' if pedido['tipo'] == 'domicilio' else 'Recoger en local'}\n"
-        f"📍 Dirección: {pedido['direccion']}\n"
-        f"────────────────\n"
-        f"{pedido['resumen']}\n"
-        f"────────────────\n"
-        f"👉 Ver panel: {os.getenv('PANEL_URL', '')}/panel"
-    )
-    enviar_whatsapp(ADMIN_NUMBER, msg)
-
-
-def notificar_pedido_actualizado_admin(numero_cliente, pedido):
-    icono = "🛵" if pedido["tipo"] == "domicilio" else "🏠"
-    msg = (
-        f"🔄 *Pedido #{pedido['id']} actualizado*\n"
-        f"🍽️ Restaurante: {pedido['restaurante']}\n"
-        f"📱 Cliente: +{numero_cliente}\n"
-        f"🕐 Hora: {pedido['hora']}\n"
-        f"{icono} Tipo: {'Domicilio' if pedido['tipo'] == 'domicilio' else 'Recoger en local'}\n"
-        f"📍 Dirección: {pedido['direccion']}\n"
-        f"────────────────\n"
-        f"{pedido['resumen']}"
-    )
-    enviar_whatsapp(ADMIN_NUMBER, msg)
-
 
 # ── ENVÍO WHATSAPP ────────────────────────────────────────────────────────────
 
@@ -296,22 +287,42 @@ def enviar_whatsapp(numero, mensaje):
     print("META →", r.status_code, r.text)
     return r
 
-
 def enviar_menu_texto(numero, rest_key):
-    r = RESTAURANTES[rest_key]
+    r = get_restaurante(rest_key)
+    extra = _estado_extra.get(rest_key, {})
+    items = get_menu(rest_key)
+    desact = extra.get("categorias_desactivadas", set())
     lineas = [f"📋 *Menú de {r['nombre']}*\n"]
-    for cat, contenido in r["menu"].items():
-        if cat not in r["categorias_desactivadas"]:
-            lineas.append(contenido)
-    if r["notas"]:
+    for item in items:
+        if item["activo"] and item["categoria"] not in desact:
+            lineas.append(item["descripcion"])
+    if extra.get("notas"):
         lineas.append("\n📝 *Notas de hoy:*")
-        for nota in r["notas"]:
+        for nota in extra["notas"]:
             lineas.append(f"- {nota}")
-    dom = "Sí, costo $3.000" if r["domicilio_activo"] else "No disponible por ahora"
+    dom = "Sí, costo $3.000" if extra.get("domicilio_activo", True) else "No disponible"
     lineas.append(f"\n🛵 *Domicilio:* {dom}")
     lineas.append("💳 *Pago:* Nequi, Daviplata, transferencia, efectivo")
     enviar_whatsapp(numero, "\n\n".join(lineas))
 
+# ── NOTIFICACIONES ADMIN ──────────────────────────────────────────────────────
+
+def notificar_pedido_admin(numero, pedido, es_nuevo=True):
+    icono = "🛵" if pedido["tipo"] == "domicilio" else "🏠"
+    prefijo = "🛎️ *Pedido nuevo*" if es_nuevo else "🔄 *Pedido actualizado*"
+    msg = (
+        f"{prefijo} #{pedido['id']}\n"
+        f"🍽️ {pedido.get('restaurante_nombre', '')}\n"
+        f"📱 +{numero}\n"
+        f"🕐 {pedido['hora']}\n"
+        f"{icono} {'Domicilio' if pedido['tipo'] == 'domicilio' else 'Recoger'}\n"
+        f"📍 {pedido['direccion']}\n"
+        f"────────────────\n"
+        f"{pedido['resumen']}\n"
+        f"────────────────\n"
+        f"👉 {os.getenv('PANEL_URL', '')}/panel"
+    )
+    enviar_whatsapp(ADMIN_NUMBER, msg)
 
 # ── COMANDOS ADMIN ────────────────────────────────────────────────────────────
 
@@ -323,9 +334,9 @@ def procesar_comando_admin(texto):
             "🛠️ *Comandos admin:*\n\n"
             "*Restaurantes:*\n"
             "• abre las bravas → abre solo hoy\n"
-            "• cierra escarabajo → cierra aunque sea horario\n"
+            "• cierra escarabajo\n"
             "• abre monaco\n\n"
-            "*Por restaurante (agrega el nombre al final):*\n"
+            "*Por restaurante:*\n"
             "• espera 30 las bravas\n"
             "• sin espera escarabajo\n"
             "• quita hamburguesas escarabajo\n"
@@ -336,102 +347,102 @@ def procesar_comando_admin(texto):
             "• activa domicilio las bravas\n\n"
             "*General:*\n"
             "• estado → ver todo\n"
-            "• ayuda → este mensaje"
+            "• recargar menu → recarga menú desde BD"
         )
 
     if t in ["estado", "ver estado"]:
         lineas = ["📋 *Estado restaurantes:*\n"]
-        for key, r in RESTAURANTES.items():
+        for key, r in _cache_restaurantes.items():
+            extra = _estado_extra.get(key, {})
             abierto = "✅ Abierto" if esta_abierto(key) else "❌ Cerrado"
-            forzado = " *(forzado hoy)*" if r["abierto_forzado"] and r["fecha_forzado"] == datetime.now(ZONA_HORARIA).date() else ""
-            dom = "✅" if r["domicilio_activo"] else "❌"
-            espera = f"{r['tiempo_espera']}min" if r["tiempo_espera"] else "—"
-            desact = ", ".join(r["categorias_desactivadas"]) or "ninguna"
-            notas_txt = ", ".join(r["notas"]) or "ninguna"
+            forzado = " *(forzado)*" if extra.get("abierto_forzado") else ""
+            dom = "✅" if extra.get("domicilio_activo", True) else "❌"
+            espera = f"{extra.get('tiempo_espera')}min" if extra.get("tiempo_espera") else "—"
+            desact = ", ".join(extra.get("categorias_desactivadas", set())) or "ninguna"
             lineas.append(
                 f"*{r['nombre']}*\n"
-                f"  {abierto}{forzado}\n"
-                f"  🛵 Dom: {dom} | ⏱ Espera: {espera}\n"
-                f"  ❌ Desactivados: {desact}\n"
-                f"  📝 Notas: {notas_txt}"
+                f"  {abierto}{forzado} | 🛵 {dom} | ⏱ {espera}\n"
+                f"  ❌ Desact: {desact}"
             )
         return "\n\n".join(lineas)
 
-    # Identificar restaurante en el texto
+    if t in ["recargar menu", "recargar menú"]:
+        cargar_restaurantes()
+        cargar_menu()
+        return "✅ Menú y restaurantes recargados desde la base de datos."
+
+    # Identificar restaurante
     rest_key = None
-    for key, r in RESTAURANTES.items():
-        nombre = r["nombre"].lower()
-        if nombre in t or key.replace("_", " ") in t or key in t:
+    for key, r in _cache_restaurantes.items():
+        if r["nombre"].lower() in t or key.replace("_", " ") in t or key in t:
             rest_key = key
             break
 
-    # ABRIR / CERRAR
     if t.startswith("abre ") or t.startswith("abrir "):
         if rest_key:
-            RESTAURANTES[rest_key]["abierto_forzado"] = True
-            RESTAURANTES[rest_key]["fecha_forzado"] = datetime.now(ZONA_HORARIA).date()
-            return f"✅ *{RESTAURANTES[rest_key]['nombre']}* abierto manualmente por hoy. Mañana se cierra solo."
-        return "⚠️ No encontré el restaurante. Usa: abre las bravas / escarabajo / monaco"
+            _estado_extra[rest_key]["abierto_forzado"] = True
+            _estado_extra[rest_key]["fecha_forzado"] = datetime.now(ZONA_HORARIA).date()
+            return f"✅ *{_cache_restaurantes[rest_key]['nombre']}* abierto hoy. Mañana se cierra solo."
+        return "⚠️ No encontré el restaurante."
 
     if t.startswith("cierra ") or t.startswith("cerrar "):
         if rest_key:
-            RESTAURANTES[rest_key]["abierto_forzado"] = False
-            RESTAURANTES[rest_key]["fecha_forzado"] = None
-            return f"✅ *{RESTAURANTES[rest_key]['nombre']}* cerrado manualmente."
+            _estado_extra[rest_key]["abierto_forzado"] = False
+            _estado_extra[rest_key]["fecha_forzado"] = None
+            supabase.table("restaurantes").update({"activo": False}).eq("id", rest_key).execute()
+            cargar_restaurantes()
+            return f"✅ *{_cache_restaurantes[rest_key]['nombre']}* cerrado."
         return "⚠️ No encontré el restaurante."
 
     if rest_key is None:
         return None
 
-    r = RESTAURANTES[rest_key]
-    nombre_display = r["nombre"]
-    nombre_lower = nombre_display.lower()
+    extra = _estado_extra[rest_key]
+    nombre = _cache_restaurantes[rest_key]["nombre"]
 
-    # DOMICILIO
     if "quita domicilio" in t or "desactiva domicilio" in t:
-        r["domicilio_activo"] = False
-        return f"✅ Domicilio desactivado en *{nombre_display}*."
-    if "activa domicilio" in t or "pon domicilio" in t:
-        r["domicilio_activo"] = True
-        return f"✅ Domicilio activado en *{nombre_display}*."
+        extra["domicilio_activo"] = False
+        return f"✅ Domicilio desactivado en *{nombre}*."
+    if "activa domicilio" in t:
+        extra["domicilio_activo"] = True
+        return f"✅ Domicilio activado en *{nombre}*."
 
-    # TIEMPO DE ESPERA
     m = re.search(r"espera\s+(\d+)", t)
     if m:
-        r["tiempo_espera"] = int(m.group(1))
-        return f"✅ Espera de *{m.group(1)} min* en {nombre_display}."
+        extra["tiempo_espera"] = int(m.group(1))
+        return f"✅ Espera de *{m.group(1)} min* en {nombre}."
     if "sin espera" in t or "quita espera" in t:
-        r["tiempo_espera"] = None
-        return f"✅ Espera eliminada en *{nombre_display}*."
+        extra["tiempo_espera"] = None
+        return f"✅ Espera eliminada en {nombre}."
 
-    # NOTAS
     if "borra notas" in t or "quita notas" in t:
-        r["notas"].clear()
-        return f"✅ Notas borradas en *{nombre_display}*."
+        extra["notas"].clear()
+        return f"✅ Notas borradas en *{nombre}*."
     if t.startswith("nota "):
-        nota = t.replace("nota ", "").replace(nombre_lower, "").replace(rest_key.replace("_", " "), "").strip()
-        r["notas"].append(nota)
-        return f"✅ Nota en *{nombre_display}*: '{nota}'"
+        nota = re.sub(r"nota\s+", "", t).replace(_cache_restaurantes[rest_key]["nombre"].lower(), "").replace(rest_key.replace("_", " "), "").strip()
+        extra["notas"].append(nota)
+        return f"✅ Nota en *{nombre}*: '{nota}'"
 
-    # CATEGORÍAS
+    items = get_menu(rest_key)
+    categorias = list({i["categoria"] for i in items})
+
     if t.startswith("quita ") or t.startswith("desactiva "):
-        palabra = re.sub(r"(quita|desactiva)\s+", "", t).replace(nombre_lower, "").replace(rest_key.replace("_", " "), "").strip()
-        for cat in r["menu"]:
+        palabra = re.sub(r"(quita|desactiva)\s+", "", t).replace(_cache_restaurantes[rest_key]["nombre"].lower(), "").replace(rest_key.replace("_", " "), "").strip()
+        for cat in categorias:
             if palabra in cat or cat in palabra:
-                r["categorias_desactivadas"].add(cat)
-                return f"✅ *{cat}* desactivado en {nombre_display}."
-        return f"⚠️ No encontré '{palabra}' en {nombre_display}. Categorías: {', '.join(r['menu'].keys())}"
+                extra["categorias_desactivadas"].add(cat)
+                return f"✅ *{cat}* desactivado en {nombre}."
+        return f"⚠️ No encontré '{palabra}'. Categorías: {', '.join(categorias)}"
 
     if t.startswith("activa ") or t.startswith("pon "):
-        palabra = re.sub(r"(activa|pon)\s+", "", t).replace(nombre_lower, "").replace(rest_key.replace("_", " "), "").strip()
-        for cat in r["menu"]:
+        palabra = re.sub(r"(activa|pon)\s+", "", t).replace(_cache_restaurantes[rest_key]["nombre"].lower(), "").replace(rest_key.replace("_", " "), "").strip()
+        for cat in categorias:
             if palabra in cat or cat in palabra:
-                r["categorias_desactivadas"].discard(cat)
-                return f"✅ *{cat}* activado en {nombre_display}."
-        return f"⚠️ No encontré '{palabra}' en {nombre_display}."
+                extra["categorias_desactivadas"].discard(cat)
+                return f"✅ *{cat}* activado en {nombre}."
+        return f"⚠️ No encontré '{palabra}'."
 
     return None
-
 
 # ── PANEL WEB ─────────────────────────────────────────────────────────────────
 
@@ -489,6 +500,7 @@ h1{font-size:1.3rem;color:#222}h1 span{display:block;font-size:.75rem;font-weigh
 .hora{font-size:.78rem;color:#888}
 .tipo-tag{display:inline-block;background:#FFC107;color:#222;padding:3px 8px;border-radius:4px;font-size:.73rem;font-weight:700;margin-top:6px}
 .cli{font-size:.83rem;color:#555;margin:6px 0 2px}
+.cli-nombre{font-size:.83rem;color:#E65100;font-weight:700;margin:2px 0}
 .dir{font-size:.78rem;color:#888;margin-bottom:6px;word-break:break-word}
 .resumen{background:#FFFBF2;padding:8px;border-radius:6px;font-size:.76rem;color:#444;max-height:100px;overflow-y:auto;border-left:3px solid #FFC107;white-space:pre-wrap;margin:6px 0}
 .mods{background:#FFF6E0;border-left:3px solid #FF9800;padding:7px;border-radius:6px;margin:6px 0;font-size:.73rem}
@@ -517,38 +529,32 @@ h1{font-size:1.3rem;color:#222}h1 span{display:block;font-size:.75rem;font-weigh
     <span id="s-activos">⚡ Activos: 0</span>
   </div>
 </header>
-
 <div class="cards-resumen">
   <div class="card-r"><span class="num" id="v-cant">0</span><span class="lbl">📦 Pedidos hoy</span></div>
   <div class="card-r total"><span class="num" id="v-total">$0</span><span class="lbl">💰 Total vendido hoy</span></div>
   <div class="card-r cancel"><span class="num" id="v-cancel">0</span><span class="lbl">❌ Cancelados hoy</span></div>
 </div>
-
 <div class="tabs">
   <button class="tab on" data-tab="todos" onclick="cambiarTab('todos')">📋 Todos <span id="c-todos"></span></button>
   <button class="tab" data-tab="preparacion" onclick="cambiarTab('preparacion')">🍳 Preparando <span id="c-prep"></span></button>
   <button class="tab" data-tab="enviados" onclick="cambiarTab('enviados')">🛵 Enviados <span id="c-env"></span></button>
   <button class="tab" data-tab="entregados" onclick="cambiarTab('entregados')">✅ Entregados <span id="c-ent"></span></button>
 </div>
-
 <div id="grid" class="grid"></div>
 <div id="empty" class="empty" style="display:none">No hay pedidos en esta pestaña 😊</div>
 </div>
-
 <script>
-const pw = "{{PW}}";
-let todos = [], tabActual = "todos";
-
+const pw="{{PW}}";
+let todos=[],tabActual="todos";
 async function cargarPedidos(){
   try{
-    const r = await fetch(`/api/pedidos?pw=${encodeURIComponent(pw)}`);
+    const r=await fetch(`/api/pedidos?pw=${encodeURIComponent(pw)}`);
     if(r.status===403){window.location.href='/panel';return;}
-    const d = await r.json();
-    todos = d.pedidos;
-    render(); stats(); contadores(); ventasHoy();
+    const d=await r.json();
+    todos=d.pedidos;
+    render();stats();contadores();ventasHoy();
   }catch(e){console.error(e);}
 }
-
 function esHoy(iso){
   try{
     const a=new Date(iso).toLocaleDateString('es-CO',{timeZone:'America/Bogota'});
@@ -556,24 +562,15 @@ function esHoy(iso){
     return a===b;
   }catch(e){return false;}
 }
-
-function extraerTotal(r){
-  if(!r)return 0;
-  const m=r.match(/Total:?\\s*\\$?\\s?([\\d.,]+)/i);
-  if(!m)return 0;
-  return parseInt(m[1].replace(/[.,]/g,''),10)||0;
-}
-
 function ventasHoy(){
-  const hoy=todos.filter(p=>esHoy(p.hora_iso));
+  const hoy=todos.filter(p=>esHoy(p.fecha));
   const vend=hoy.filter(p=>p.estado!=='cancelado');
   const canc=hoy.filter(p=>p.estado==='cancelado');
-  const total=vend.reduce((a,p)=>a+extraerTotal(p.resumen),0);
+  const total=vend.reduce((a,p)=>a+(p.total||0),0);
   document.getElementById('v-cant').textContent=vend.length;
   document.getElementById('v-total').textContent='$'+Math.round(total).toLocaleString('es-CO');
   document.getElementById('v-cancel').textContent=canc.length;
 }
-
 function stats(){
   const ahora=new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
   document.getElementById('s-hora').textContent=`🕐 ${ahora}`;
@@ -581,34 +578,29 @@ function stats(){
   const act=todos.filter(p=>p.estado==='activo'||p.estado==='preparando').length;
   document.getElementById('s-activos').textContent=`⚡ Activos: ${act}`;
 }
-
 function contadores(){
   document.getElementById('c-todos').textContent=`(${todos.length})`;
   document.getElementById('c-prep').textContent=`(${todos.filter(p=>p.estado==='activo'||p.estado==='preparando').length})`;
   document.getElementById('c-env').textContent=`(${todos.filter(p=>p.estado==='enviado').length})`;
   document.getElementById('c-ent').textContent=`(${todos.filter(p=>p.estado==='entregado').length})`;
 }
-
 function filtrar(tab){
   if(tab==='preparacion')return todos.filter(p=>p.estado==='activo'||p.estado==='preparando');
   if(tab==='enviados')return todos.filter(p=>p.estado==='enviado');
   if(tab==='entregados')return todos.filter(p=>p.estado==='entregado');
   return todos;
 }
-
 function cambiarTab(tab){
   tabActual=tab;
   document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));
   document.querySelector(`.tab[data-tab="${tab}"]`).classList.add('on');
   render();
 }
-
 const EST_MAP={activo:'🆕 Activo',preparando:'🍳 Preparando',enviado:'🛵 Enviado',entregado:'✅ Entregado',cancelado:'❌ Cancelado'};
 const BTNS=[
   {k:'activo',i:'🆕',c:'eb-activo'},{k:'preparando',i:'🍳',c:'eb-preparando'},
   {k:'enviado',i:'🛵',c:'eb-enviado'},{k:'entregado',i:'✅',c:'eb-entregado'},{k:'cancelado',i:'❌',c:'eb-cancelado'}
 ];
-
 function render(){
   const g=document.getElementById('grid');
   const e=document.getElementById('empty');
@@ -618,28 +610,26 @@ function render(){
   g.innerHTML=lista.map(p=>`
     <div class="card">
       <div class="pid">#${p.id}</div>
-      <div class="rest-tag">🍽️ ${p.restaurante||'—'}</div>
-      <div class="hora">🕐 ${p.hora}</div>
+      <div class="rest-tag">🍽️ ${p.restaurante_nombre||'—'}</div>
+      <div class="hora">🕐 ${p.hora||''}</div>
       <div class="tipo-tag">${p.tipo==='domicilio'?'🛵 Domicilio':'🏠 Recoger'}</div>
-      <div class="cli">📱 ${p.numero}</div>
+      <div class="cli">📱 ${p.numero_cliente}</div>
+      ${p.cliente_nombre?`<div class="cli-nombre">👤 ${p.cliente_nombre}</div>`:''}
       <div class="dir">📍 ${p.direccion}</div>
-      <div class="resumen">${p.resumen}</div>
+      <div class="resumen">${p.resumen||''}</div>
       ${p.modificaciones&&p.modificaciones.length?`<div class="mods"><strong>📝 Modificaciones:</strong><br>${p.modificaciones.join('<br>')}</div>`:''}
       ${p.quejas&&p.quejas.length?`<div class="quejas-box"><strong>⚠️ Quejas:</strong><br>${p.quejas.join('<br>')}</div>`:''}
       <div class="est-lbl ${p.estado}">${EST_MAP[p.estado]||p.estado}</div>
       <div class="ebts">${BTNS.map(b=>`<button class="eb ${b.c} ${p.estado===b.k?'on':''}" title="${b.k}" onclick="cambiarEstado('${p.id}','${b.k}')">${b.i}</button>`).join('')}</div>
     </div>`).join('');
 }
-
 async function cambiarEstado(id,estado){
   await fetch(`/api/pedidos/${id}/estado`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pw,estado})});
   cargarPedidos();
 }
-
 cargarPedidos();
 setInterval(cargarPedidos,6000);
 </script></body></html>"""
-
 
 # ── RUTAS ─────────────────────────────────────────────────────────────────────
 
@@ -657,7 +647,12 @@ async def panel(pw: str = ""):
 async def api_pedidos(pw: str = ""):
     if pw != PANEL_PASSWORD:
         raise HTTPException(status_code=403)
-    return {"pedidos": list(reversed(pedidos))}
+    todos = get_todos_pedidos()
+    # Enriquecer con nombre del cliente
+    for p in todos:
+        cli = get_cliente(p.get("numero_cliente", ""))
+        p["cliente_nombre"] = cli["nombre"] if cli else ""
+    return {"pedidos": todos}
 
 @app.post("/api/pedidos/{pedido_id}/estado")
 async def cambiar_estado(pedido_id: str, request: Request):
@@ -667,32 +662,23 @@ async def cambiar_estado(pedido_id: str, request: Request):
     nuevo = body.get("estado", "")
     if nuevo not in ["activo", "preparando", "enviado", "entregado", "cancelado"]:
         raise HTTPException(status_code=400)
-    pedido = next((p for p in pedidos if p["id"] == pedido_id), None)
+    pedido = get_pedido_by_id(pedido_id)
     if not pedido:
         raise HTTPException(status_code=404)
-
     anterior = pedido["estado"]
-    pedido["estado"] = nuevo
-    numero = pedido["numero"]
-
+    actualizar_estado_pedido(pedido_id, nuevo)
+    numero = pedido["numero_cliente"]
+    nombre_rest = pedido.get("restaurante_nombre", "")
     if nuevo == "enviado" and anterior != "enviado":
-        msg = (
-            f"🛵 *¡Tu pedido va en camino!*\nPedido #{pedido['id']} hacia {pedido['direccion']}.\n¡Gracias por pedir en {pedido['restaurante']}! 🍔"
-            if pedido["tipo"] == "domicilio"
-            else f"✅ *¡Tu pedido está listo!*\nPedido #{pedido['id']} listo para recoger.\n¡Te esperamos en {pedido['restaurante']}! 🍔"
-        )
+        msg = (f"🛵 *¡Tu pedido va en camino!*\n#{pedido_id} hacia {pedido['direccion']}.\n¡Gracias por pedir en {nombre_rest}! 🍔"
+               if pedido["tipo"] == "domicilio"
+               else f"✅ *¡Tu pedido está listo!*\n#{pedido_id} listo para recoger.\n¡Te esperamos en {nombre_rest}! 🍔")
         enviar_whatsapp(numero, msg)
-
     if nuevo == "entregado" and anterior != "entregado":
-        enviar_whatsapp(numero, f"🙌 *¡Pedido entregado!* Esperamos que lo disfrutes.\n¡Gracias por elegir {pedido['restaurante']}! 😊")
-
+        enviar_whatsapp(numero, f"🙌 *¡Pedido entregado!* Esperamos que lo disfrutes.\n¡Gracias por elegir {nombre_rest}! 😊")
     if nuevo == "cancelado" and anterior != "cancelado":
-        enviar_whatsapp(numero, f"❌ *Pedido #{pedido['id']} cancelado.*\nSi tienes dudas contáctanos. ¡Hasta pronto! 🍔")
-
-    return {"ok": True, "pedido": pedido}
-
-
-# ── WEBHOOK ───────────────────────────────────────────────────────────────────
+        enviar_whatsapp(numero, f"❌ *Pedido #{pedido_id} cancelado.*\nSi tienes dudas contáctanos. ¡Hasta pronto! 🍔")
+    return {"ok": True}
 
 @app.get("/webhook")
 async def verificar_webhook(request: Request):
@@ -700,7 +686,6 @@ async def verificar_webhook(request: Request):
     if params.get("hub.verify_token") == VERIFY_TOKEN:
         return PlainTextResponse(params.get("hub.challenge", ""))
     return PlainTextResponse("Token invalido", status_code=403)
-
 
 @app.post("/webhook")
 async def recibir_mensaje(request: Request):
@@ -713,14 +698,12 @@ async def recibir_mensaje(request: Request):
 
         mensaje = entry["messages"][0]
 
-        # Solo texto
         if mensaje.get("type") != "text":
             numero = mensaje["from"]
             if numero != ADMIN_NUMBER:
-                enviar_whatsapp(numero, "Por ahora solo puedo leer mensajes de texto 😊 Escríbeme tu pedido.")
+                enviar_whatsapp(numero, "Por ahora solo puedo leer mensajes de texto 😊")
             return {"status": "ok"}
 
-        # Deduplicar
         message_id = mensaje.get("id", "")
         if message_id in mensajes_procesados:
             return {"status": "ok"}
@@ -730,8 +713,8 @@ async def recibir_mensaje(request: Request):
             mensajes_procesados.clear()
             mensajes_procesados.update(ids[-250:])
 
-        numero = mensaje["from"]
-        texto = mensaje["text"]["body"]
+        numero  = mensaje["from"]
+        texto   = mensaje["text"]["body"]
         texto_lower = texto.strip().lower()
         print(f"De {numero}: {texto}")
 
@@ -742,7 +725,37 @@ async def recibir_mensaje(request: Request):
                 enviar_whatsapp(numero, resp_admin)
                 return {"status": "ok"}
 
-        # ── PALABRAS CLAVE PARA VOLVER AL MENÚ DE RESTAURANTES ──
+        # ── REGISTRO DE CLIENTE ───────────────────────────────────────────────
+        if numero in clientes_registrando:
+            paso = clientes_registrando[numero]["paso"]
+            if paso == "nombre":
+                clientes_registrando[numero]["nombre"] = texto.strip()
+                clientes_registrando[numero]["paso"] = "direccion"
+                enviar_whatsapp(numero, f"¡Perfecto {texto.strip()}! 😊 ¿Cuál es tu dirección habitual para domicilios?\n_(Si no tienes una fija escribe *no tengo*)_")
+                return {"status": "ok"}
+            elif paso == "direccion":
+                nombre = clientes_registrando[numero]["nombre"]
+                direccion = texto.strip() if texto_lower != "no tengo" else ""
+                crear_cliente(numero, nombre, direccion)
+                clientes_registrando.pop(numero)
+                enviar_whatsapp(numero,
+                    f"✅ *¡Listo {nombre}, ya estás registrado!*\n\n"
+                    f"Ahora elige un restaurante 👇")
+                enviar_whatsapp(numero, lista_restaurantes())
+                return {"status": "ok"}
+
+        # ── VERIFICAR SI CLIENTE ESTÁ REGISTRADO ─────────────────────────────
+        cliente = get_cliente(numero)
+        if not cliente and numero != ADMIN_NUMBER:
+            if numero not in clientes_registrando:
+                clientes_registrando[numero] = {"paso": "nombre"}
+                enviar_whatsapp(numero,
+                    "¡Hola! 👋 Bienvenido a *Ipiales Delivery* 🍽️\n\n"
+                    "Para comenzar necesito registrarte.\n"
+                    "¿Cuál es tu nombre?")
+                return {"status": "ok"}
+
+        # ── PALABRAS CLAVE PARA VOLVER ────────────────────────────────────────
         if texto_lower in ["inicio", "volver", "restaurantes", "cambiar", "menu", "menú"]:
             cliente_restaurante.pop(numero, None)
             historial.pop(numero, None)
@@ -750,30 +763,31 @@ async def recibir_mensaje(request: Request):
             enviar_whatsapp(numero, lista_restaurantes())
             return {"status": "ok"}
 
-        # ── CLIENTE SIN RESTAURANTE ELEGIDO O ELIGIENDO ──
+        # ── CLIENTE SIN RESTAURANTE O ELIGIENDO ──────────────────────────────
         if numero not in cliente_restaurante or numero in clientes_eligiendo:
             clientes_eligiendo[numero] = True
-            keys = list(RESTAURANTES.keys())
+            keys = list(_cache_restaurantes.keys())
             rest_key = None
             if texto_lower == "1": rest_key = keys[0]
             elif texto_lower == "2": rest_key = keys[1]
             elif texto_lower == "3": rest_key = keys[2]
             else:
-                for k, r in RESTAURANTES.items():
+                for k, r in _cache_restaurantes.items():
                     if r["nombre"].lower() in texto_lower or k.replace("_", " ") in texto_lower:
                         rest_key = k
                         break
 
             if rest_key is None:
-                # Primera vez: muestra la lista. Siguientes veces: pide que elija.
                 if numero not in cliente_restaurante:
-                    enviar_whatsapp(numero, lista_restaurantes())
+                    nombre_cli = cliente["nombre"] if cliente else ""
+                    saludo = f"¡Hola {nombre_cli}! 👋\n\n" if nombre_cli else ""
+                    enviar_whatsapp(numero, saludo + lista_restaurantes())
                 else:
                     enviar_whatsapp(numero, "Escribe el *nombre* o el *número* del restaurante (1, 2 o 3) 😊")
                 return {"status": "ok"}
 
             if not esta_abierto(rest_key):
-                r = RESTAURANTES[rest_key]
+                r = _cache_restaurantes[rest_key]
                 enviar_whatsapp(numero,
                     f"😔 *{r['nombre']}* está cerrado ahora.\n"
                     f"Horario: {r['hora_inicio']}:00 – {r['hora_fin']}:00.\n\n"
@@ -783,46 +797,40 @@ async def recibir_mensaje(request: Request):
             cliente_restaurante[numero] = rest_key
             clientes_eligiendo.pop(numero, None)
             historial[numero] = []
-            r = RESTAURANTES[rest_key]
+            r = _cache_restaurantes[rest_key]
+            nombre_cli = cliente["nombre"] if cliente else ""
             enviar_whatsapp(numero,
-                f"¡Perfecto! Estás en *{r['nombre']}* 🎉\n"
+                f"¡Perfecto{' ' + nombre_cli if nombre_cli else ''}! Estás en *{r['nombre']}* 🎉\n"
                 f"📍 {r['direccion']}\n\n"
-                f"¿Qué deseas pedir? Puedes pedirme el menú o decirme directamente 😊\n\n"
+                f"¿Qué deseas pedir? 😊\n\n"
                 f"_(Escribe *restaurantes* para volver a elegir)_")
             return {"status": "ok"}
 
-        # ── YA ELIGIÓ RESTAURANTE ──
+        # ── YA ELIGIÓ RESTAURANTE ─────────────────────────────────────────────
         rest_key = cliente_restaurante[numero]
 
-        # Verificar que siga abierto
         if not esta_abierto(rest_key) and numero != ADMIN_NUMBER:
-            r = RESTAURANTES[rest_key]
-            enviar_whatsapp(numero,
-                f"😔 *{r['nombre']}* cerró por hoy. Horario: {r['hora_inicio']}:00–{r['hora_fin']}:00.\n"
-                f"¡Gracias! Vuelve mañana 🙏")
+            r = _cache_restaurantes[rest_key]
+            enviar_whatsapp(numero, f"😔 *{r['nombre']}* cerró. Horario: {r['hora_inicio']}:00–{r['hora_fin']}:00. ¡Hasta mañana! 🙏")
             cliente_restaurante.pop(numero, None)
             return {"status": "ok"}
 
-        # ─── ¿CLIENTE RESPONDIENDO "MODIFICAR O NUEVO"? ──────────────────────
+        # ── RESPONDIENDO "MODIFICAR O NUEVO" ──────────────────────────────────
         saltar_palabras_clave = False
         if numero in clientes_esperando_decision:
             mensaje_original = clientes_esperando_decision.pop(numero)
-            quiere_modificar = any(p in texto_lower for p in ["modificar", "el mismo", "modificarlo", "ese pedido", "el actual", "actualizar"])
-            quiere_nuevo = any(p in texto_lower for p in ["nuevo", "otro pedido", "uno nuevo", "aparte", "diferente"])
+            quiere_modificar = any(p in texto_lower for p in ["modificar", "el mismo", "ese pedido", "actualizar"])
+            quiere_nuevo = any(p in texto_lower for p in ["nuevo", "otro pedido", "uno nuevo", "aparte"])
 
             if quiere_modificar:
-                pedido = buscar_pedido_cliente(numero)
+                pedido = buscar_pedido_activo_cliente(numero)
                 if pedido:
-                    pedido["modificaciones"].append(mensaje_original)
-                    enviar_whatsapp(numero, "✅ Listo, hemos anotado ese cambio en tu pedido. ¡El equipo lo procesará! 🍔")
-                    enviar_whatsapp(ADMIN_NUMBER,
-                        f"📝 *Pedido #{pedido['id']} modificado*\n"
-                        f"🍽️ {pedido['restaurante']}\n"
-                        f"📱 +{numero}\n────────────────\n{mensaje_original}")
+                    agregar_modificacion(pedido["id"], mensaje_original)
+                    enviar_whatsapp(numero, "✅ Cambio anotado en tu pedido. ¡El equipo lo procesará! 🍔")
+                    enviar_whatsapp(ADMIN_NUMBER, f"📝 Pedido #{pedido['id']} modificado\n+{numero}\n{mensaje_original}")
                 else:
-                    enviar_whatsapp(numero, "Tu pedido anterior ya no está activo. ¿Quieres hacer uno nuevo? Cuéntame 😊")
+                    enviar_whatsapp(numero, "Tu pedido anterior ya no está activo. ¿Quieres hacer uno nuevo?")
                 return {"status": "ok"}
-
             elif quiere_nuevo:
                 historial[numero] = []
                 texto = mensaje_original
@@ -833,60 +841,70 @@ async def recibir_mensaje(request: Request):
                 enviar_whatsapp(numero, "¿Quieres *modificar* tu pedido actual o hacer un *pedido nuevo*? Responde 'modificar' o 'nuevo'.")
                 return {"status": "ok"}
 
-        # ─── OPCIONES ESPECIALES DEL CLIENTE ─────────────────────────────────
+        # ── OPCIONES ESPECIALES ───────────────────────────────────────────────
         if not saltar_palabras_clave:
 
-            # CANCELAR PEDIDO
             if any(p in texto_lower for p in ["cancelar pedido", "eliminar pedido", "quiero cancelar"]):
-                pedido = buscar_pedido_cliente(numero)
+                pedido = buscar_pedido_activo_cliente(numero)
                 if pedido:
-                    pedido["estado"] = "cancelado"
-                    enviar_whatsapp(numero, f"❌ Tu pedido #{pedido['id']} ha sido cancelado.\nSi cambias de idea, ¡escríbenos! 🍔")
-                    enviar_whatsapp(ADMIN_NUMBER, f"⚠️ *Pedido #{pedido['id']} cancelado por cliente*\n+{numero}\n🍽️ {pedido['restaurante']}")
+                    actualizar_estado_pedido(pedido["id"], "cancelado")
+                    enviar_whatsapp(numero, f"❌ Pedido #{pedido['id']} cancelado. ¡Hasta pronto! 🍔")
+                    enviar_whatsapp(ADMIN_NUMBER, f"⚠️ Pedido #{pedido['id']} cancelado por +{numero}")
                 else:
-                    enviar_whatsapp(numero, "No encontramos un pedido activo para cancelar. ¿Deseas hacer uno nuevo?")
+                    enviar_whatsapp(numero, "No encontramos un pedido activo para cancelar.")
                 return {"status": "ok"}
 
-            # MODIFICAR PEDIDO
-            if any(p in texto_lower for p in ["modificar pedido", "cambiar plato", "quiero cambiar", "agregar algo"]):
-                pedido = buscar_pedido_cliente(numero)
+            if any(p in texto_lower for p in ["modificar pedido", "cambiar pedido", "agregar algo"]):
+                pedido = buscar_pedido_activo_cliente(numero)
                 if pedido:
-                    pedido["modificaciones"].append(texto)
-                    enviar_whatsapp(numero, "✅ Hemos recibido tu solicitud de cambio. ¡El equipo lo procesará! 🍔")
-                    enviar_whatsapp(ADMIN_NUMBER,
-                        f"📝 *Pedido #{pedido['id']} modificado*\n"
-                        f"🍽️ {pedido['restaurante']}\n📱 +{numero}\n────────────────\n{texto}")
+                    agregar_modificacion(pedido["id"], texto)
+                    enviar_whatsapp(numero, "✅ Modificación recibida. ¡El equipo lo procesará! 🍔")
+                    enviar_whatsapp(ADMIN_NUMBER, f"📝 Pedido #{pedido['id']} modificado\n+{numero}\n{texto}")
                 else:
-                    enviar_whatsapp(numero, "No encontramos un pedido activo. ¿Deseas hacer uno nuevo?")
+                    enviar_whatsapp(numero, "No encontramos un pedido activo.")
                 return {"status": "ok"}
 
-            # QUEJAS
-            if any(p in texto_lower for p in ["queja", "reclamación", "problema con mi pedido", "está mal", "no llegó"]):
-                pedido = buscar_pedido_cliente(numero)
+            if any(p in texto_lower for p in ["queja", "reclamación", "problema con mi pedido", "está mal"]):
+                pedido = buscar_pedido_activo_cliente(numero)
                 if pedido:
-                    pedido["quejas"].append(texto)
-                    enviar_whatsapp(numero, "⚠️ Hemos recibido tu reclamación. Nuestro equipo se pondrá en contacto contigo pronto. ¡Disculpa! 😟")
-                    enviar_whatsapp(ADMIN_NUMBER, f"⚠️ *QUEJA — Pedido #{pedido['id']}*\n🍽️ {pedido['restaurante']}\n📱 +{numero}\n{texto}")
+                    agregar_queja(pedido["id"], texto)
+                    enviar_whatsapp(numero, "⚠️ Reclamación recibida. Nuestro equipo te contactará pronto. ¡Disculpa! 😟")
+                    enviar_whatsapp(ADMIN_NUMBER, f"⚠️ QUEJA #{pedido['id']}\n+{numero}\n{texto}")
                 else:
-                    enviar_whatsapp(numero, "Cuéntanos qué pasó para ayudarte mejor 😊")
+                    enviar_whatsapp(numero, "Cuéntanos qué pasó 😊")
                 return {"status": "ok"}
 
-            # MENÚ PDF
-            if any(p in texto_lower for p in ["pdf", "carta", "el menú", "el menu", "menú completo", "menu completo", "ver menú", "ver menu"]):
+            if any(p in texto_lower for p in ["el menú", "el menu", "menú", "menu", "carta", "pdf"]):
                 enviar_menu_texto(numero, rest_key)
                 enviar_whatsapp(numero, "¿Qué te gustaría pedir? 😊")
                 return {"status": "ok"}
 
-            # ¿TIENE PEDIDO ACTIVO RECIENTE Y ESCRIBE ALGO AMBIGUO?
-            pedido_activo = buscar_pedido_cliente(numero)
-            if pedido_activo and pedido_es_reciente(pedido_activo):
+            if any(p in texto_lower for p in ["mis pedidos", "mi historial", "mis órdenes"]):
+                try:
+                    res = supabase.table("pedidos").select("*")\
+                        .eq("numero_cliente", numero)\
+                        .order("fecha", desc=True).limit(5).execute()
+                    hist = res.data or []
+                    if not hist:
+                        enviar_whatsapp(numero, "Aún no tienes pedidos registrados 😊")
+                    else:
+                        lineas = ["📦 *Tus últimos pedidos:*\n"]
+                        for p in hist:
+                            lineas.append(f"#{p['id']} — {p.get('restaurante_nombre','')} — {p['estado'].upper()} — {p['hora']}")
+                        enviar_whatsapp(numero, "\n".join(lineas))
+                except Exception:
+                    enviar_whatsapp(numero, "No pude cargar tu historial ahora.")
+                return {"status": "ok"}
+
+            pedido_activo = buscar_pedido_activo_cliente(numero)
+            if pedido_activo:
                 clientes_esperando_decision[numero] = texto
                 enviar_whatsapp(numero,
-                    f"👋 Ya tienes un pedido activo (#{pedido_activo['id']}) en *{pedido_activo['restaurante']}*.\n"
+                    f"👋 Ya tienes un pedido activo (#{pedido_activo['id']}) en *{pedido_activo.get('restaurante_nombre','')}*.\n"
                     f"¿Quieres *modificar* ese pedido o hacer un *pedido nuevo*?\nResponde 'modificar' o 'nuevo' 😊")
                 return {"status": "ok"}
 
-        # ─── CONVERSACIÓN NORMAL CON CLAUDE ──────────────────────────────────
+        # ── CLAUDE ────────────────────────────────────────────────────────────
         if numero not in historial:
             historial[numero] = []
         historial[numero].append({"role": "user", "content": texto})
@@ -895,7 +913,7 @@ async def recibir_mensaje(request: Request):
         resp = ai.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=600,
-            system=build_system_prompt(rest_key),
+            system=build_system_prompt(rest_key, cliente),
             messages=historial[numero],
         )
         texto_respuesta = resp.content[0].text
@@ -907,10 +925,10 @@ async def recibir_mensaje(request: Request):
 
         enviar_whatsapp(numero, texto_respuesta)
 
-        # ── DETECTAR CIERRE DE PEDIDO ─────────────────────────────────────────
+        # Detectar cierre de pedido
         palabras_cierre = ["en camino", "listo para recoger", "pasamos a preparar", "empezamos a preparar"]
-        tiene_contexto = any(p in texto_respuesta.lower() for p in ["domicilio", "recoger", "local"])
-        es_cierre = any(p in texto_respuesta.lower() for p in palabras_cierre)
+        tiene_contexto  = any(p in texto_respuesta.lower() for p in ["domicilio", "recoger", "local"])
+        es_cierre       = any(p in texto_respuesta.lower() for p in palabras_cierre)
 
         if es_cierre and tiene_contexto:
             resumen = texto_respuesta
@@ -918,11 +936,12 @@ async def recibir_mensaje(request: Request):
                 if msg["role"] == "assistant" and "total" in msg["content"].lower() and "$" in msg["content"]:
                     resumen = msg["content"]
                     break
-            pedido, es_nuevo = registrar_pedido(numero, resumen, texto_respuesta, rest_key)
-            if es_nuevo:
-                notificar_pedido_admin(numero, pedido)
-            else:
-                notificar_pedido_actualizado_admin(numero, pedido)
+            pedido, es_nuevo = crear_pedido(numero, resumen, texto_respuesta, rest_key)
+            notificar_pedido_admin(numero, pedido, es_nuevo)
+
+            # Si tiene dirección guardada en perfil y no la tiene en el pedido, actualizar
+            if cliente and cliente.get("direccion") and pedido.get("direccion") in ["Ver resumen", ""]:
+                actualizar_estado_pedido(pedido["id"], "activo")
 
     except Exception:
         traceback.print_exc()
