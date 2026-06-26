@@ -756,7 +756,7 @@ async def recibir_mensaje(request: Request):
                 return {"status": "ok"}
 
         # ── PALABRAS CLAVE PARA VOLVER ────────────────────────────────────────
-        if texto_lower in ["inicio", "volver", "restaurantes", "cambiar", "menu", "menú"]:
+        if texto_lower in ["inicio", "volver", "restaurantes", "cambiar", "menu", "menú", "cambiar restaurante", "otro restaurante"]:
             cliente_restaurante.pop(numero, None)
             historial.pop(numero, None)
             clientes_eligiendo[numero] = True
@@ -879,6 +879,35 @@ async def recibir_mensaje(request: Request):
                 enviar_whatsapp(numero, "¿Qué te gustaría pedir? 😊")
                 return {"status": "ok"}
 
+            if any(p in texto_lower for p in ["ayuda", "help"]):
+                enviar_whatsapp(numero,
+                    "🤖 *¿Qué puedo hacer por ti?*\n\n"
+                    "🍽️ *Restaurantes:*\n"
+                    "• Escribe *restaurantes* → ver y cambiar de restaurante\n\n"
+                    "📋 *Menú:*\n"
+                    "• Escribe *menú* → ver el menú completo\n\n"
+                    "🛒 *Pedidos:*\n"
+                    "• Solo dime qué quieres pedir 😊\n"
+                    "• Escribe *cancelar pedido* → cancelar tu pedido\n"
+                    "• Escribe *modificar pedido* → cambiar algo de tu pedido\n"
+                    "• Escribe *mis pedidos* → ver tus últimos 5 pedidos\n\n"
+                    "⚠️ *Problemas:*\n"
+                    "• Escribe *queja* → reportar un problema\n\n"
+                    "👤 *Persona real:*\n"
+                    "• Escribe *encargado* → te conectamos con el equipo"
+                )
+                return {"status": "ok"}
+
+            if any(p in texto_lower for p in ["encargado", "hablar con", "persona real", "humano"]):
+                r = _cache_restaurantes[rest_key]
+                enviar_whatsapp(numero,
+                    f"😊 Claro, te conecto con el equipo de *{r['nombre']}*.\n\n"
+                    f"📍 {r['direccion']}\n\n"
+                    f"Escribe *ayuda* para ver todas las opciones disponibles."
+                )
+                return {"status": "ok"}
+
+
             if any(p in texto_lower for p in ["mis pedidos", "mi historial", "mis órdenes"]):
                 try:
                     res = supabase.table("pedidos").select("*")\
@@ -897,7 +926,11 @@ async def recibir_mensaje(request: Request):
                 return {"status": "ok"}
 
             pedido_activo = buscar_pedido_activo_cliente(numero)
-            if pedido_activo:
+            palabras_pedido = ["quiero", "pedir", "me das", "dame", "una ", "un ", "dos ", "tres ",
+                               "combo", "hamburguesa", "pizza", "salchipapa", "perro", "bebida", "gaseosa",
+                               "pollo", "burger", "papas", "malteada", "limonada"]
+            parece_pedido = any(p in texto_lower for p in palabras_pedido)
+            if pedido_activo and parece_pedido:
                 clientes_esperando_decision[numero] = texto
                 enviar_whatsapp(numero,
                     f"👋 Ya tienes un pedido activo (#{pedido_activo['id']}) en *{pedido_activo.get('restaurante_nombre','')}*.\n"
