@@ -760,14 +760,9 @@ async def recibir_mensaje(request: Request):
             enviar_whatsapp(numero, lista_restaurantes())
             return {"status": "ok"}
 
-        # ── CLIENTE SIN RESTAURANTE ELEGIDO ──
-        if numero not in cliente_restaurante:
+        # ── CLIENTE SIN RESTAURANTE ELEGIDO O ELIGIENDO ──
+        if numero not in cliente_restaurante or numero in clientes_eligiendo:
             clientes_eligiendo[numero] = True
-            enviar_whatsapp(numero, lista_restaurantes())
-            return {"status": "ok"}
-
-        # ── CLIENTE ELIGIENDO RESTAURANTE ──
-        if numero in clientes_eligiendo:
             keys = list(RESTAURANTES.keys())
             rest_key = None
             if texto_lower == "1": rest_key = keys[0]
@@ -780,7 +775,11 @@ async def recibir_mensaje(request: Request):
                         break
 
             if rest_key is None:
-                enviar_whatsapp(numero, "Por favor responde *1*, *2* o *3* para elegir el restaurante 😊")
+                # Primera vez: muestra la lista. Siguientes veces: pide que elija.
+                if numero not in cliente_restaurante:
+                    enviar_whatsapp(numero, lista_restaurantes())
+                else:
+                    enviar_whatsapp(numero, "Escribe el *nombre* o el *número* del restaurante (1, 2 o 3) 😊")
                 return {"status": "ok"}
 
             if not esta_abierto(rest_key):
