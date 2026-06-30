@@ -132,26 +132,86 @@ def get_todos_pedidos():
     except Exception:
         return []
 
-def crear_pedido(numero, resumen, confirmacion_bot, rest_key):
+def extraer_pedido_estructurado(conversacion_texto, rest_key):
+    """Usa Claude para extraer el pedido en formato estructurado (JSON),
+    eliminando la necesidad de adivinar tipo/dirección por texto libre."""
     r = get_restaurante(rest_key)
-    es_domicilio = any(p in confirmacion_bot.lower() for p in ["camino", "domicilio"])
-    tipo = "domicilio" if es_domicilio else "recoger"
-    direccion = "En local"
-    if es_domicilio:
-        txt = confirmacion_bot.lower()
-        for marca in ["domicilio a", "a la dirección"]:
-            if marca in txt:
-                inicio = confirmacion_bot.lower().index(marca) + len(marca)
-                direccion = confirmacion_bot[inicio:].split(".")[0].strip()
-                break
-        if direccion == "En local":
-            direccion = "Ver resumen"
+    prompt_extraccion = f"""Analiza esta conversación de un pedido en {r['nombre']} ({r['direccion']}) y responde SOLO con un JSON válido, sin texto adicional, sin markdown, sin explicación.
 
-    # Extraer total
-    total = 0
-    m = re.search(r"Total:?\s*\$?\s?([\d.,]+)", resumen, re.IGNORECASE)
-    if m:
-        total = int(m.group(1).replace(".", "").replace(",", "")) 
+Formato exacto:
+{{
+  "tipo": "domicilio" o "recoger",
+  "direccion": "dirección completa si es domicilio, o vacío si es recoger",
+  "total": numero_entero_sin_puntos_ni_simbolos,
+  "resumen_items": "lista de productos pedidos con cantidades y precios, en texto plano"
+}}
+
+Reglas:
+- Si el cliente mencionó cualquier lugar de entrega (casa, edificio, barrio, calle, conjunto, punto de referencia), tipo es "domicilio".
+- Si el cliente dijo explícitamente que recoge en el local, o nunca mencionó dirección y el bot preguntó y confirmó "recoger", tipo es "recoger".
+- Si hay duda, prioriza "domicilio" si se mencionó algún lugar.
+- total debe ser el monto final incluyendo domicilio si aplica.
+
+Conversación:
+{conversacion_texto}"""
+
+    try:
+        ai = anthropic.Anthropic(api_key=CLAUDE_KEY)
+        resp = ai.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt_extraccion}],
+        )
+        texto = resp.content[0].text.strip()
+        # Limpiar posibles backticks de markdown
+        texto = re.sub(r"^```json\s*|\s*```$", "", texto.strip(), flags=re.MULTILINE).strip()
+        import json
+        data = json.loads(texto)
+        return data
+    except Exception:
+        traceback.print_exc()
+        return None
+
+
+def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurados=None):
+    """Crea o actualiza el pedido. Si datos_estructurados viene de
+    extraer_pedido_estructurado(), se usa eso (confiable). Si no,
+    se cae al método anterior de adivinar por texto (respaldo)."""
+    r = get_restaurante(rest_key)
+
+    if datos_estructurados:
+        tipo = datos_estructurados.get("tipo", "recoger")
+        if tipo not in ["domicilio", "recoger"]:
+            tipo = "recoger"
+        direccion = datos_estructurados.get("direccion", "").strip()
+        if tipo == "recoger" or not direccion:
+            direccion = "En local" if tipo == "recoger" else "Ver resumen"
+        try:
+            total = int(datos_estructurados.get("total", 0))
+        except (ValueError, TypeError):
+            total = 0
+        if not total:
+            m = re.search(r"Total:?\s*\$?\s?([\d.,]+)", resumen, re.IGNORECASE)
+            if m:
+                total = int(m.group(1).replace(".", "").replace(",", ""))
+    else:
+        # Respaldo: método anterior por si falla la extracción estructurada
+        es_domicilio = any(p in confirmacion_bot.lower() for p in ["camino", "domicilio a", "a la dirección"])
+        tipo = "domicilio" if es_domicilio else "recoger"
+        direccion = "En local"
+        if es_domicilio:
+            txt = confirmacion_bot.lower()
+            for marca in ["domicilio a", "a la dirección"]:
+                if marca in txt:
+                    inicio = confirmacion_bot.lower().index(marca) + len(marca)
+                    direccion = confirmacion_bot[inicio:].split(".")[0].strip()
+                    break
+            if direccion == "En local":
+                direccion = "Ver resumen"
+        total = 0
+        m = re.search(r"Total:?\s*\$?\s?([\d.,]+)", resumen, re.IGNORECASE)
+        if m:
+            total = int(m.group(1).replace(".", "").replace(",", ""))
 
     ahora = datetime.now(ZONA_HORARIA)
 
