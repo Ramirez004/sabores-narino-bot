@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Domiciliarios — Ipiales Delivery</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Segoe UI',sans-serif; background:#161616; color:#fff; min-height:100vh; }
+  .container { max-width:480px; margin:0 auto; padding:16px; min-height:100vh; display:flex; flex-direction:column; }
+
+  /* LOGIN */
+  .login-box { margin:auto; background:#222; border-radius:16px; padding:30px 24px; text-align:center; }
+  .login-box h1 { font-size:1.4rem; margin-bottom:6px; }
+  .login-box p { color:#999; font-size:.85rem; margin-bottom:22px; }
+  .login-box select { width:100%; padding:14px; border-radius:10px; border:1px solid #444; background:#2c2c2c; color:#fff; font-size:1rem; margin-bottom:14px; }
+  .login-box button { width:100%; padding:14px; border:none; border-radius:10px; background:#FFC107; color:#1a1a1a; font-weight:700; font-size:1rem; cursor:pointer; }
+
+  /* HEADER */
+  header { display:flex; justify-content:space-between; align-items:center; padding:10px 0 18px; }
+  header .saludo { font-size:1.1rem; font-weight:700; }
+  header .saludo span { display:block; font-size:.75rem; color:#999; font-weight:400; margin-top:2px; }
+  .toggle-wrap { display:flex; align-items:center; gap:8px; }
+  .toggle { width:50px; height:28px; background:#444; border-radius:20px; position:relative; cursor:pointer; transition:.2s; }
+  .toggle.on { background:#4CAF50; }
+  .toggle .knob { width:22px; height:22px; background:#fff; border-radius:50%; position:absolute; top:3px; left:3px; transition:.2s; }
+  .toggle.on .knob { left:25px; }
+  .toggle-label { font-size:.78rem; color:#999; }
+
+  /* STATS */
+  .stats-row { display:flex; gap:10px; margin-bottom:18px; }
+  .stat-card { flex:1; background:#222; border-radius:12px; padding:12px; text-align:center; }
+  .stat-card .num { font-size:1.4rem; font-weight:700; color:#FFC107; }
+  .stat-card .lbl { font-size:.7rem; color:#999; margin-top:2px; }
+
+  /* PEDIDO DISPONIBLE */
+  .pedido-disponible { background:linear-gradient(135deg,#FFC107,#F57C00); border-radius:16px; padding:18px; color:#1a1a1a; margin-bottom:16px; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(255,193,7,.5)} 50%{box-shadow:0 0 0 12px rgba(255,193,7,0)} }
+  .pedido-disponible .badge { font-size:.7rem; font-weight:700; text-transform:uppercase; opacity:.8; margin-bottom:6px; }
+  .pedido-disponible h2 { font-size:1.2rem; margin-bottom:8px; }
+  .pedido-disponible .info-row { display:flex; gap:8px; align-items:flex-start; margin-bottom:6px; font-size:.88rem; }
+  .pedido-disponible .info-row b { min-width:18px; }
+  .btn-aceptar { width:100%; margin-top:14px; padding:16px; border:none; border-radius:12px; background:#1a1a1a; color:#FFC107; font-weight:700; font-size:1.05rem; cursor:pointer; }
+  .btn-aceptar:active { transform:scale(.98); }
+
+  /* MIS PEDIDOS ACTIVOS */
+  .mis-pedidos h3 { font-size:.9rem; color:#999; margin-bottom:10px; text-transform:uppercase; letter-spacing:.5px; }
+  .pedido-activo-card { background:#222; border-left:4px solid #2196F3; border-radius:10px; padding:14px; margin-bottom:10px; }
+  .pedido-activo-card .id { font-weight:700; color:#2196F3; font-size:.95rem; }
+  .pedido-activo-card .dir { font-size:.85rem; color:#ccc; margin:6px 0; }
+  .pedido-activo-card .resumen { font-size:.78rem; color:#999; background:#1a1a1a; padding:8px; border-radius:6px; margin:8px 0; white-space:pre-wrap; max-height:90px; overflow-y:auto; }
+  .btn-entregado { width:100%; padding:12px; border:none; border-radius:8px; background:#9C27B0; color:#fff; font-weight:700; cursor:pointer; margin-top:6px; }
+
+  .empty-msg { text-align:center; color:#666; padding:40px 20px; font-size:.9rem; }
+  .empty-msg .icon { font-size:2.5rem; margin-bottom:10px; }
+
+  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#333; color:#fff; padding:12px 20px; border-radius:10px; font-size:.85rem; opacity:0; transition:.3s; pointer-events:none; max-width:90%; text-align:center; }
+  .toast.show { opacity:1; }
+
+  .btn-logout { background:none; border:none; color:#666; font-size:.75rem; text-decoration:underline; cursor:pointer; margin-top:18px; }
+</style>
+</head>
+<body>
+<div class="container" id="app"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const API = "";
+let domiciliario = localStorage.getItem("dom_nombre") || "";
+let polling = null;
+
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 2500);
+}
+
+function renderLogin() {
+  document.getElementById("app").innerHTML = `
+    <div class="login-box">
+      <h1>🛵 Domiciliarios</h1>
+      <p>Ipiales Delivery</p>
+      <select id="sel-nombre">
+        <option value="">Selecciona tu nombre</option>
+        <option value="Damian">Damian</option>
+        <option value="Samuel">Samuel</option>
+      </select>
+      <button onclick="entrar()">Entrar</button>
+    </div>
+  `;
+}
+
+function entrar() {
+  const nombre = document.getElementById("sel-nombre").value;
+  if (!nombre) { toast("Selecciona tu nombre"); return; }
+  localStorage.setItem("dom_nombre", nombre);
+  domiciliario = nombre;
+  renderApp();
+}
+
+function logout() {
+  localStorage.removeItem("dom_nombre");
+  domiciliario = "";
+  if (polling) clearInterval(polling);
+  renderLogin();
+}
+
+let disponible = true;
+let pedidoActual = null;
+let misPedidos = [];
+let stats = { pedidos_hoy: 0 };
+
+async function cargarDatos() {
+  try {
+    const [rPend, rMios] = await Promise.all([
+      fetch(`${API}/api/domiciliario/pedidos-pendientes?nombre=${encodeURIComponent(domiciliario)}`),
+      fetch(`${API}/api/domiciliario/mis-pedidos?nombre=${encodeURIComponent(domiciliario)}`)
+    ]);
+    const dPend = await rPend.json();
+    const dMios = await rMios.json();
+    pedidoActual = dPend.pedido;
+    stats = dPend.stats || stats;
+    misPedidos = dMios.pedidos || [];
+    render();
+  } catch (e) { console.error(e); }
+}
+
+function toggleDisponible() {
+  disponible = !disponible;
+  fetch(`${API}/api/domiciliario/disponibilidad`, {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ nombre: domiciliario, disponible })
+  });
+  render();
+  if (disponible) cargarDatos();
+}
+
+async function aceptarPedido(pedidoId) {
+  const r = await fetch(`${API}/api/domiciliario/aceptar`, {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ nombre: domiciliario, pedido_id: pedidoId })
+  });
+  const d = await r.json();
+  if (d.ok) {
+    toast("✅ ¡Pedido aceptado!");
+    cargarDatos();
+  } else {
+    toast(d.msg || "Este pedido ya fue tomado");
+    cargarDatos();
+  }
+}
+
+async function marcarEntregado(pedidoId) {
+  if (!confirm("¿Confirmas que entregaste este pedido?")) return;
+  await fetch(`${API}/api/domiciliario/entregado`, {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ nombre: domiciliario, pedido_id: pedidoId })
+  });
+  toast("🙌 ¡Pedido entregado!");
+  cargarDatos();
+}
+
+function renderApp() {
+  render();
+  cargarDatos();
+  if (polling) clearInterval(polling);
+  polling = setInterval(cargarDatos, 5000);
+}
+
+function render() {
+  let pedidoHtml = "";
+  if (disponible && pedidoActual) {
+    pedidoHtml = `
+      <div class="pedido-disponible">
+        <div class="badge">🔔 Pedido disponible</div>
+        <h2>🍽️ ${pedidoActual.restaurante_nombre || ""}</h2>
+        <div class="info-row"><b>📍</b><span>${pedidoActual.direccion || ""}</span></div>
+        <div class="info-row"><b>💰</b><span>Domicilio: $5.000</span></div>
+        <button class="btn-aceptar" onclick="aceptarPedido('${pedidoActual.id}')">✅ Aceptar pedido</button>
+      </div>
+    `;
+  } else if (!disponible) {
+    pedidoHtml = `<div class="empty-msg"><div class="icon">😴</div>Estás desconectado.<br>Actívate para recibir pedidos.</div>`;
+  } else {
+    pedidoHtml = `<div class="empty-msg"><div class="icon">⏳</div>Esperando nuevos pedidos...</div>`;
+  }
+
+  let misPedidosHtml = "";
+  if (misPedidos.length > 0) {
+    misPedidosHtml = `
+      <div class="mis-pedidos">
+        <h3>📦 Tus entregas activas</h3>
+        ${misPedidos.map(p => `
+          <div class="pedido-activo-card">
+            <div class="id">#${p.id} — ${p.restaurante_nombre || ""}</div>
+            <div class="dir">📍 ${p.direccion || ""}</div>
+            <div class="resumen">${p.resumen || ""}</div>
+            <button class="btn-entregado" onclick="marcarEntregado('${p.id}')">✅ Marcar como entregado</button>
+          </div>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  document.getElementById("app").innerHTML = `
+    <header>
+      <div class="saludo">👋 ${domiciliario}<span>${stats.pedidos_hoy || 0} entregas hoy</span></div>
+      <div class="toggle-wrap">
+        <span class="toggle-label">${disponible ? "Disponible" : "Desconectado"}</span>
+        <div class="toggle ${disponible ? "on" : ""}" onclick="toggleDisponible()"><div class="knob"></div></div>
+      </div>
+    </header>
+
+    ${pedidoHtml}
+    ${misPedidosHtml}
+
+    <button class="btn-logout" onclick="logout()">Cerrar sesión</button>
+  `;
+}
+
+if (domiciliario) {
+  renderApp();
+} else {
+  renderLogin();
+}
+</script>
+</body>
+</html>
