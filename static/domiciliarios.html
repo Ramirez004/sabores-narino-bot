@@ -9,14 +9,14 @@
   body { font-family:'Segoe UI',sans-serif; background:#161616; color:#fff; min-height:100vh; }
   .container { max-width:480px; margin:0 auto; padding:16px; min-height:100vh; display:flex; flex-direction:column; }
 
-  /* LOGIN */
   .login-box { margin:auto; background:#222; border-radius:16px; padding:30px 24px; text-align:center; }
   .login-box h1 { font-size:1.4rem; margin-bottom:6px; }
   .login-box p { color:#999; font-size:.85rem; margin-bottom:22px; }
-  .login-box select { width:100%; padding:14px; border-radius:10px; border:1px solid #444; background:#2c2c2c; color:#fff; font-size:1rem; margin-bottom:14px; }
+  .login-box select, .login-box input { width:100%; padding:14px; border-radius:10px; border:1px solid #444; background:#2c2c2c; color:#fff; font-size:1rem; margin-bottom:14px; text-align:center; letter-spacing:2px; }
+  .login-box input::placeholder { letter-spacing:normal; }
   .login-box button { width:100%; padding:14px; border:none; border-radius:10px; background:#FFC107; color:#1a1a1a; font-weight:700; font-size:1rem; cursor:pointer; }
+  .login-error { color:#f44336; font-size:.82rem; margin:-6px 0 12px; display:none; }
 
-  /* HEADER */
   header { display:flex; justify-content:space-between; align-items:center; padding:10px 0 18px; }
   header .saludo { font-size:1.1rem; font-weight:700; }
   header .saludo span { display:block; font-size:.75rem; color:#999; font-weight:400; margin-top:2px; }
@@ -27,13 +27,6 @@
   .toggle.on .knob { left:25px; }
   .toggle-label { font-size:.78rem; color:#999; }
 
-  /* STATS */
-  .stats-row { display:flex; gap:10px; margin-bottom:18px; }
-  .stat-card { flex:1; background:#222; border-radius:12px; padding:12px; text-align:center; }
-  .stat-card .num { font-size:1.4rem; font-weight:700; color:#FFC107; }
-  .stat-card .lbl { font-size:.7rem; color:#999; margin-top:2px; }
-
-  /* PEDIDO DISPONIBLE */
   .pedido-disponible { background:linear-gradient(135deg,#FFC107,#F57C00); border-radius:16px; padding:18px; color:#1a1a1a; margin-bottom:16px; animation: pulse 1.5s infinite; }
   @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(255,193,7,.5)} 50%{box-shadow:0 0 0 12px rgba(255,193,7,0)} }
   .pedido-disponible .badge { font-size:.7rem; font-weight:700; text-transform:uppercase; opacity:.8; margin-bottom:6px; }
@@ -43,7 +36,6 @@
   .btn-aceptar { width:100%; margin-top:14px; padding:16px; border:none; border-radius:12px; background:#1a1a1a; color:#FFC107; font-weight:700; font-size:1.05rem; cursor:pointer; }
   .btn-aceptar:active { transform:scale(.98); }
 
-  /* MIS PEDIDOS ACTIVOS */
   .mis-pedidos h3 { font-size:.9rem; color:#999; margin-bottom:10px; text-transform:uppercase; letter-spacing:.5px; }
   .pedido-activo-card { background:#222; border-left:4px solid #2196F3; border-radius:10px; padding:14px; margin-bottom:10px; }
   .pedido-activo-card .id { font-weight:700; color:#2196F3; font-size:.95rem; }
@@ -54,10 +46,20 @@
   .empty-msg { text-align:center; color:#666; padding:40px 20px; font-size:.9rem; }
   .empty-msg .icon { font-size:2.5rem; margin-bottom:10px; }
 
-  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#333; color:#fff; padding:12px 20px; border-radius:10px; font-size:.85rem; opacity:0; transition:.3s; pointer-events:none; max-width:90%; text-align:center; }
+  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#333; color:#fff; padding:12px 20px; border-radius:10px; font-size:.85rem; opacity:0; transition:.3s; pointer-events:none; max-width:90%; text-align:center; z-index:999; }
   .toast.show { opacity:1; }
 
   .btn-logout { background:none; border:none; color:#666; font-size:.75rem; text-decoration:underline; cursor:pointer; margin-top:18px; }
+  .btn-pin { background:none; border:none; color:#999; font-size:.75rem; text-decoration:underline; cursor:pointer; margin-top:10px; }
+
+  .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.7); display:flex; align-items:center; justify-content:center; z-index:1000; padding:20px; }
+  .modal-box { background:#222; border-radius:16px; padding:24px; width:100%; max-width:340px; }
+  .modal-box h3 { font-size:1.1rem; margin-bottom:16px; text-align:center; }
+  .modal-box input { width:100%; padding:12px; border-radius:8px; border:1px solid #444; background:#2c2c2c; color:#fff; font-size:1rem; margin-bottom:12px; text-align:center; letter-spacing:2px; }
+  .modal-btns { display:flex; gap:8px; margin-top:6px; }
+  .modal-btns button { flex:1; padding:12px; border:none; border-radius:8px; font-weight:700; cursor:pointer; }
+  .btn-cancelar { background:#444; color:#fff; }
+  .btn-guardar { background:#FFC107; color:#1a1a1a; }
 </style>
 </head>
 <body>
@@ -86,17 +88,39 @@ function renderLogin() {
         <option value="Damian">Damian</option>
         <option value="Samuel">Samuel</option>
       </select>
+      <input type="password" id="inp-pin" placeholder="PIN de 6 dígitos" inputmode="numeric" maxlength="6">
+      <div class="login-error" id="login-error">PIN incorrecto</div>
       <button onclick="entrar()">Entrar</button>
     </div>
   `;
 }
 
-function entrar() {
+async function entrar() {
   const nombre = document.getElementById("sel-nombre").value;
+  const pin = document.getElementById("inp-pin").value.trim();
+  const err = document.getElementById("login-error");
+  err.style.display = "none";
+
   if (!nombre) { toast("Selecciona tu nombre"); return; }
-  localStorage.setItem("dom_nombre", nombre);
-  domiciliario = nombre;
-  renderApp();
+  if (!pin || pin.length !== 6) { toast("Ingresa tu PIN de 6 dígitos"); return; }
+
+  try {
+    const r = await fetch(`${API}/api/domiciliario/login`, {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ nombre, pin })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      localStorage.setItem("dom_nombre", nombre);
+      domiciliario = nombre;
+      renderApp();
+    } else {
+      err.textContent = d.msg || "PIN incorrecto";
+      err.style.display = "block";
+    }
+  } catch (e) {
+    toast("Error de conexión");
+  }
 }
 
 function logout() {
@@ -104,6 +128,54 @@ function logout() {
   domiciliario = "";
   if (polling) clearInterval(polling);
   renderLogin();
+}
+
+function abrirCambiarPin() {
+  document.body.insertAdjacentHTML("beforeend", `
+    <div class="modal-overlay" id="modal-pin">
+      <div class="modal-box">
+        <h3>🔒 Cambiar PIN</h3>
+        <input type="password" id="pin-actual" placeholder="PIN actual" inputmode="numeric" maxlength="6">
+        <input type="password" id="pin-nuevo" placeholder="PIN nuevo (6 dígitos)" inputmode="numeric" maxlength="6">
+        <input type="password" id="pin-nuevo2" placeholder="Repite el PIN nuevo" inputmode="numeric" maxlength="6">
+        <div class="modal-btns">
+          <button class="btn-cancelar" onclick="cerrarModalPin()">Cancelar</button>
+          <button class="btn-guardar" onclick="guardarNuevoPin()">Guardar</button>
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+function cerrarModalPin() {
+  const m = document.getElementById("modal-pin");
+  if (m) m.remove();
+}
+
+async function guardarNuevoPin() {
+  const pinActual = document.getElementById("pin-actual").value.trim();
+  const pinNuevo = document.getElementById("pin-nuevo").value.trim();
+  const pinNuevo2 = document.getElementById("pin-nuevo2").value.trim();
+
+  if (!pinActual || !pinNuevo || !pinNuevo2) { toast("Completa todos los campos"); return; }
+  if (pinNuevo.length !== 6 || !/^\d+$/.test(pinNuevo)) { toast("El PIN nuevo debe tener 6 dígitos"); return; }
+  if (pinNuevo !== pinNuevo2) { toast("Los PIN nuevos no coinciden"); return; }
+
+  try {
+    const r = await fetch(`${API}/api/domiciliario/cambiar-pin`, {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ nombre: domiciliario, pin_actual: pinActual, pin_nuevo: pinNuevo })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      toast("✅ PIN actualizado");
+      cerrarModalPin();
+    } else {
+      toast(d.msg || "No se pudo cambiar el PIN");
+    }
+  } catch (e) {
+    toast("Error de conexión");
+  }
 }
 
 let disponible = true;
@@ -215,6 +287,7 @@ function render() {
     ${pedidoHtml}
     ${misPedidosHtml}
 
+    <button class="btn-pin" onclick="abrirCambiarPin()">🔒 Cambiar mi PIN</button>
     <button class="btn-logout" onclick="logout()">Cerrar sesión</button>
   `;
 }
