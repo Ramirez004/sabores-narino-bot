@@ -557,6 +557,11 @@ h1{font-size:1.3rem;color:#222}h1 span{display:block;font-size:.75rem;font-weigh
 .est-lbl{text-align:center;font-size:.78rem;font-weight:700;padding:4px;border-radius:4px;margin:8px 0 5px}
 .est-lbl.activo{color:#2E7D32}.est-lbl.preparando{color:#1565C0}.est-lbl.enviado{color:#1565C0}.est-lbl.entregado{color:#6A1B9A}.est-lbl.cancelado{color:#C62828}
 .ebts{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.btn-buscar-dom{width:100%;padding:11px;border:none;border-radius:8px;background:linear-gradient(135deg,#FFC107,#F57C00);color:#222;font-weight:700;font-size:.85rem;cursor:pointer;margin:8px 0}
+.btn-buscar-dom:hover{filter:brightness(1.05)}
+.btn-buscar-dom:disabled{opacity:.6;cursor:default}
+.dom-buscando{width:100%;padding:11px;border-radius:8px;background:#3a3a2a;color:#FFC107;font-weight:700;font-size:.85rem;text-align:center;margin:8px 0}
+.dom-asignado{width:100%;padding:11px;border-radius:8px;background:#1b3a1b;color:#4CAF50;font-weight:700;font-size:.85rem;text-align:center;margin:8px 0}
 .eb{padding:8px 0;border:none;border-radius:6px;cursor:pointer;font-size:.95rem;background:#f5f5f0;color:#aaa;opacity:.65;transition:all .15s}
 .eb:hover{opacity:1}.eb.on{opacity:1}
 .eb-activo.on{background:#4CAF50;color:#fff}.eb-preparando.on{background:#FF9800;color:#fff}
@@ -601,6 +606,7 @@ async function cargarPedidos(){
     if(r.status===403){window.location.href='/panel';return;}
     const d=await r.json();
     todos=d.pedidos;
+    await cargarEstadosDom(todos);
     render();stats();contadores();ventasHoy();
   }catch(e){console.error(e);}
 }
@@ -650,6 +656,46 @@ const BTNS=[
   {k:'activo',i:'🆕',c:'eb-activo'},{k:'preparando',i:'📥',c:'eb-preparando'},
   {k:'enviado',i:'🛵',c:'eb-enviado'},{k:'entregado',i:'✅',c:'eb-entregado'},{k:'cancelado',i:'❌',c:'eb-cancelado'}
 ];
+let estadosDom = {}; // pedido_id -> {asignado, nombre, buscando}
+
+async function cargarEstadosDom(pedidos) {
+  const domiciliosActivos = pedidos.filter(p => p.tipo === 'domicilio' && p.estado !== 'entregado' && p.estado !== 'cancelado');
+  for (const p of domiciliosActivos) {
+    try {
+      const r = await fetch(`/api/pedidos/${p.id}/estado-domiciliario?pw=${encodeURIComponent(pw)}`);
+      estadosDom[p.id] = await r.json();
+    } catch(e) {}
+  }
+}
+
+async function buscarDomiciliario(id) {
+  const btn = document.getElementById(`btn-dom-${id}`);
+  if (btn) { btn.disabled = true; btn.textContent = "🔍 Buscando..."; }
+  try {
+    const r = await fetch(`/api/pedidos/${id}/buscar-domiciliario`, {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({pw})
+    });
+    const d = await r.json();
+    if (!d.ok) { alert(d.msg || "No se pudo buscar domiciliario"); }
+    await cargarPedidos();
+  } catch(e) {
+    alert("Error al buscar domiciliario");
+    cargarPedidos();
+  }
+}
+
+function htmlBotonDom(p) {
+  if (p.tipo !== 'domicilio') return '';
+  const est = estadosDom[p.id] || {};
+  if (est.asignado) {
+    return `<div class="dom-asignado">🛵 Asignado a ${est.nombre || 'domiciliario'}</div>`;
+  }
+  if (est.buscando) {
+    return `<div class="dom-buscando">🔍 Buscando domiciliario...</div>`;
+  }
+  return `<button class="btn-buscar-dom" id="btn-dom-${p.id}" onclick="buscarDomiciliario('${p.id}')">🛵 Empezar a buscar domiciliario</button>`;
+}
+
 function render(){
   const g=document.getElementById('grid');
   const e=document.getElementById('empty');
@@ -669,6 +715,7 @@ function render(){
       ${p.modificaciones&&p.modificaciones.length?`<div class="mods"><strong>📝 Modificaciones:</strong><br>${p.modificaciones.join('<br>')}</div>`:''}
       ${p.quejas&&p.quejas.length?`<div class="quejas-box"><strong>⚠️ Quejas:</strong><br>${p.quejas.join('<br>')}</div>`:''}
       <div class="est-lbl ${p.estado}">${EST_MAP[p.estado]||p.estado}</div>
+      ${htmlBotonDom(p)}
       <div class="ebts">${BTNS.map(b=>`<button class="eb ${b.c} ${p.estado===b.k?'on':''}" title="${b.k}" onclick="cambiarEstado('${p.id}','${b.k}')">${b.i}</button>`).join('')}</div>
     </div>`).join('');
 }
@@ -719,13 +766,6 @@ async def cambiar_estado(pedido_id: str, request: Request):
     numero = pedido["numero_cliente"]
     nombre_rest = pedido.get("restaurante_nombre", "")
 
-    # Cuando el restaurante marca "Pedido Recibido" y es domicilio,
-    # se ofrece automáticamente a los domiciliarios disponibles
-    if nuevo == "preparando" and anterior != "preparando" and pedido.get("tipo") == "domicilio":
-        pedido_actualizado = get_pedido_by_id(pedido_id)
-        agregar_pedido_pendiente(pedido_actualizado)
-        notificar_domiciliarios_whatsapp(pedido_actualizado)
-
     if nuevo == "enviado" and anterior != "enviado":
         msg = (f"🛵 *¡Tu pedido va en camino!*\n#{pedido_id} hacia {pedido['direccion']}.\n¡Gracias por pedir en {nombre_rest}! 🍔"
                if pedido["tipo"] == "domicilio"
@@ -736,6 +776,44 @@ async def cambiar_estado(pedido_id: str, request: Request):
     if nuevo == "cancelado" and anterior != "cancelado":
         enviar_whatsapp(numero, f"❌ *Pedido #{pedido_id} cancelado.*\nSi tienes dudas contáctanos. ¡Hasta pronto! 🍔")
     return {"ok": True}
+
+@app.post("/api/pedidos/{pedido_id}/buscar-domiciliario")
+async def buscar_domiciliario(pedido_id: str, request: Request):
+    body = await request.json()
+    if body.get("pw") != PANEL_PASSWORD:
+        raise HTTPException(status_code=403)
+    pedido = get_pedido_by_id(pedido_id)
+    if not pedido:
+        raise HTTPException(status_code=404)
+    if pedido.get("tipo") != "domicilio":
+        return {"ok": False, "msg": "Este pedido no es de domicilio"}
+    if pedido_ya_asignado(pedido_id):
+        return {"ok": False, "msg": "Este pedido ya tiene domiciliario asignado"}
+
+    agregar_pedido_pendiente(pedido)
+    doms = get_domiciliarios_disponibles()
+    if not doms:
+        return {"ok": False, "msg": "No hay domiciliarios disponibles en este momento"}
+    notificar_domiciliarios_whatsapp(pedido)
+    return {"ok": True, "msg": f"Buscando entre {len(doms)} domiciliario(s) disponible(s)"}
+
+@app.get("/api/pedidos/{pedido_id}/estado-domiciliario")
+async def estado_domiciliario(pedido_id: str, pw: str = ""):
+    if pw != PANEL_PASSWORD:
+        raise HTTPException(status_code=403)
+    asignado = pedido_ya_asignado(pedido_id)
+    nombre = None
+    if asignado:
+        try:
+            res = supabase.table("asignaciones").select("domiciliario_id").eq("pedido_id", pedido_id).execute()
+            if res.data:
+                dom_res = supabase.table("domiciliarios").select("nombre").eq("id", res.data[0]["domiciliario_id"]).execute()
+                if dom_res.data:
+                    nombre = dom_res.data[0]["nombre"]
+        except Exception:
+            pass
+    buscando = pedido_id in _pedidos_pendientes
+    return {"asignado": asignado, "nombre": nombre, "buscando": buscando}
 
 # ── RUTAS DOMICILIARIOS ──────────────────────────────────────────────────────
 
