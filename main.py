@@ -196,6 +196,21 @@ def get_todos_pedidos():
     except Exception:
         return []
 
+def get_pedidos_restaurante(rest_key, desde=None, hasta=None, limite=200):
+    """Pedidos de un solo restaurante, filtrados directo en la base de datos
+    (no acotado por el límite global de get_todos_pedidos), con filtro opcional de fecha."""
+    try:
+        q = supabase.table("pedidos").select("*").eq("restaurante_id", rest_key).order("fecha", desc=True).limit(limite)
+        if desde:
+            q = q.gte("fecha", desde)
+        if hasta:
+            q = q.lte("fecha", hasta)
+        res = q.execute()
+        return res.data or []
+    except Exception:
+        traceback.print_exc()
+        return []
+
 def extraer_pedido_estructurado(conversacion_texto, rest_key):
     """Usa Claude para extraer el pedido en formato estructurado (JSON),
     eliminando la necesidad de adivinar tipo/dirección por texto libre."""
@@ -376,6 +391,9 @@ def normalizar_texto(s):
     """Quita tildes y pasa a minúsculas para comparar nombres sin depender de acentos."""
     return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii").lower()
 
+DIAS_SEMANA = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"]
+DIAS_SEMANA_ABREV = {"lunes": "Lun", "martes": "Mar", "miercoles": "Mié", "jueves": "Jue", "viernes": "Vie", "sabado": "Sáb", "domingo": "Dom"}
+
 def esta_abierto(rest_key):
     r = get_restaurante(rest_key)
     if not r:
@@ -390,7 +408,30 @@ def esta_abierto(rest_key):
         guardar_estado_extra(rest_key)
     if not r.get("activo", True):
         return False
+    horario = r.get("horario_semanal")
+    if horario:
+        dia = DIAS_SEMANA[ahora.weekday()]
+        cfg = horario.get(dia) or {}
+        if not cfg.get("abierto", False):
+            return False
+        return cfg.get("hora_inicio", 0) <= ahora.hour < cfg.get("hora_fin", 0)
     return r["hora_inicio"] <= ahora.hour < r["hora_fin"]
+
+def formato_horario(r):
+    """Texto legible del horario: por día si hay horario_semanal configurado,
+    o la franja fija de siempre si no."""
+    horario = r.get("horario_semanal")
+    if not horario:
+        return f"{r['hora_inicio']}:00 – {r['hora_fin']}:00 (todos los días)"
+    partes = []
+    for dia in DIAS_SEMANA:
+        cfg = horario.get(dia) or {}
+        abrev = DIAS_SEMANA_ABREV[dia]
+        if cfg.get("abierto"):
+            partes.append(f"{abrev} {cfg.get('hora_inicio', 0)}:00-{cfg.get('hora_fin', 0)}:00")
+        else:
+            partes.append(f"{abrev} Cerrado")
+    return ", ".join(partes)
 
 def lista_restaurantes():
     lineas = ["🍽️ *Bienvenido a Ipiales Delivery*\n\nElige un restaurante:\n"]
@@ -423,7 +464,7 @@ def build_system_prompt(rest_key, cliente=None):
     ) if hay_bebidas else ""
 
     return f"""Eres el asistente virtual de *{r['nombre']}*, en {r['direccion']}, Ipiales.
-HORARIO: {r['hora_inicio']}:00 – {r['hora_fin']}:00
+HORARIO: {formato_horario(r)}
 DOMICILIO: {dom}
 MÉTODOS DE PAGO: Nequi, Daviplata, transferencia, efectivo.
 MENÚ:
@@ -1289,24 +1330,25 @@ async def panel_restaurante_route(request: Request):
     return HTMLResponse(LOGIN_RESTAURANTE_HTML)
 
 @app.get("/api/restaurante-panel/pedidos")
-async def api_restaurante_panel_pedidos(request: Request):
+async def api_restaurante_panel_pedidos(request: Request, desde: str = "", hasta: str = ""):
     rest_key = verificar_token_restaurante(request.cookies.get("rest_session", ""))
     if not rest_key:
         raise HTTPException(status_code=403)
-    todos = get_todos_pedidos()
-    propios = [p for p in todos if p.get("restaurante_id") == rest_key]
+    propios = get_pedidos_restaurante(rest_key, desde or None, hasta or None)
     for p in propios:
         cli = get_cliente(p.get("numero_cliente", ""))
         p["cliente_nombre"] = cli["nombre"] if cli else ""
         if p.get("tipo") == "domicilio" and p.get("estado") not in ["entregado", "cancelado"]:
             p["estado_domiciliario"] = _obtener_estado_domiciliario_pedido(p["id"])
     extra = _estado_extra[rest_key]
+    r = get_restaurante(rest_key)
     estado = {
         "domicilio_activo": extra.get("domicilio_activo", True),
         "tiempo_espera": extra.get("tiempo_espera"),
         "notas": extra.get("notas", []),
         "abierto_forzado": extra.get("abierto_forzado", False),
         "abierto_ahora": esta_abierto(rest_key),
+        "horario_semanal": r.get("horario_semanal") if r else None,
     }
     return {"pedidos": propios, "estado": estado}
 
@@ -1353,6 +1395,81 @@ async def api_restaurante_panel_configuracion(request: Request):
         extra["notas"] = [n for n in body["notas"] if n]
     guardar_estado_extra(rest_key)
     return {"ok": True}
+
+@app.get("/api/restaurante-panel/menu")
+async def api_restaurante_panel_menu(request: Request):
+    rest_key = verificar_token_restaurante(request.cookies.get("rest_session", ""))
+    if not rest_key:
+        raise HTTPException(status_code=403)
+    try:
+        res = supabase.table("menu_items").select("*").eq("restaurante_id", rest_key).order("categoria").execute()
+        return {"ok": True, "data": res.data or []}
+    except Exception as e:
+        return {"ok": False, "msg": str(e)}
+
+@app.post("/api/restaurante-panel/menu/{item_id}/toggle")
+async def api_restaurante_panel_toggle_item(item_id: int, request: Request):
+    body = await request.json()
+    rest_key = verificar_token_restaurante(request.cookies.get("rest_session", ""))
+    if not rest_key:
+        raise HTTPException(status_code=403)
+    try:
+        item_res = supabase.table("menu_items").select("restaurante_id").eq("id", item_id).execute()
+        if not item_res.data or item_res.data[0]["restaurante_id"] != rest_key:
+            raise HTTPException(status_code=404)
+        supabase.table("menu_items").update({"activo": bool(body.get("activo", True))}).eq("id", item_id).execute()
+        cargar_menu()
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"ok": False, "msg": str(e)}
+
+@app.get("/api/restaurante-panel/stats")
+async def api_restaurante_panel_stats(request: Request):
+    rest_key = verificar_token_restaurante(request.cookies.get("rest_session", ""))
+    if not rest_key:
+        raise HTTPException(status_code=403)
+    try:
+        todos = get_pedidos_restaurante(rest_key, limite=500)
+        hoy = date.today().isoformat()
+        inicio_semana = (date.today() - timedelta(days=date.today().weekday())).isoformat()
+
+        pedidos_hoy = [p for p in todos if p.get("fecha", "").startswith(hoy)]
+        pedidos_semana = [p for p in todos if p.get("fecha", "") >= inicio_semana]
+
+        ventas_hoy = sum(p.get("total", 0) for p in pedidos_hoy if p.get("estado") != "cancelado")
+        ventas_semana = sum(p.get("total", 0) for p in pedidos_semana if p.get("estado") != "cancelado")
+
+        calificaciones = [p["calificacion"] for p in todos if p.get("calificacion")]
+        promedio_calificacion = round(sum(calificaciones) / len(calificaciones), 1) if calificaciones else None
+
+        return {
+            "ok": True,
+            "stats": {
+                "pedidos_hoy": len(pedidos_hoy),
+                "ventas_hoy": ventas_hoy,
+                "pedidos_semana": len(pedidos_semana),
+                "ventas_semana": ventas_semana,
+                "promedio_calificacion": promedio_calificacion,
+                "total_calificaciones": len(calificaciones),
+            }
+        }
+    except Exception as e:
+        return {"ok": False, "msg": str(e)}
+
+@app.post("/api/restaurante-panel/horario")
+async def api_restaurante_panel_horario(request: Request):
+    body = await request.json()
+    rest_key = verificar_token_restaurante(request.cookies.get("rest_session", ""))
+    if not rest_key:
+        raise HTTPException(status_code=403)
+    try:
+        supabase.table("restaurantes").update({"horario_semanal": body.get("horario_semanal")}).eq("id", rest_key).execute()
+        cargar_restaurantes()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "msg": str(e)}
 
 # ── RUTAS DOMICILIARIOS ──────────────────────────────────────────────────────
 
