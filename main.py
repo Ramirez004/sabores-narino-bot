@@ -19,6 +19,10 @@ CLAUDE_KEY      = os.getenv("CLAUDE_KEY")
 WHATSAPP_TOKEN  = os.getenv("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 VERIFY_TOKEN    = os.getenv("VERIFY_TOKEN")
+# App Secret de tu app de Meta (Meta for Developers → tu app → Configuración básica →
+# "Clave secreta de la app"). Se usa para verificar que los mensajes del webhook
+# realmente vengan de WhatsApp/Meta y no de alguien que descubrió la URL.
+WHATSAPP_APP_SECRET = os.getenv("WHATSAPP_APP_SECRET", "")
 PANEL_PASSWORD  = os.getenv("PANEL_PASSWORD", "ipiales2024")
 SUPABASE_URL    = os.getenv("SUPABASE_URL")
 SUPABASE_KEY    = os.getenv("SUPABASE_KEY")
@@ -526,6 +530,23 @@ def verificar_sesion_dom(dom_id, token):
         return None
     return dom
 
+# ── SEGURIDAD DEL WEBHOOK ─────────────────────────────────────────────────────
+
+def verificar_firma_webhook(raw_body: bytes, firma_header: str) -> bool:
+    """Verifica que el payload del webhook venga realmente de Meta/WhatsApp
+    (HMAC-SHA256 del cuerpo crudo con el App Secret), no de alguien que
+    fabricó la petición a mano conociendo la URL.
+    Si WHATSAPP_APP_SECRET no está configurada, se deja pasar (para no tumbar
+    el bot por accidente) pero se advierte en los logs — configúrala en Railway."""
+    if not WHATSAPP_APP_SECRET:
+        print("⚠️ WHATSAPP_APP_SECRET no está configurada: el webhook NO está protegido contra mensajes falsificados.")
+        return True
+    if not firma_header or not firma_header.startswith("sha256="):
+        return False
+    firma_esperada = hmac.new(WHATSAPP_APP_SECRET.encode(), raw_body, hashlib.sha256).hexdigest()
+    firma_recibida = firma_header.split("=", 1)[1]
+    return hmac.compare_digest(firma_esperada, firma_recibida)
+
 def set_disponible_domiciliario(telefono, disponible):
     try:
         supabase.table("domiciliarios").update({"disponible": disponible}).eq("telefono", telefono).execute()
@@ -880,6 +901,7 @@ h1{font-size:1.3rem;color:#222}h1 span{display:block;font-size:.75rem;font-weigh
 </div>
 <script>
 const pw="{{PW}}";
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 let todos=[],tabActual="todos";
 async function cargarPedidos(){
   try{
@@ -969,7 +991,7 @@ function htmlBotonDom(p) {
   if (p.tipo !== 'domicilio') return '';
   const est = estadosDom[p.id] || {};
   if (est.asignado) {
-    return `<div class="dom-asignado">🛵 Asignado a ${est.nombre || 'domiciliario'}</div>`;
+    return `<div class="dom-asignado">🛵 Asignado a ${esc(est.nombre || 'domiciliario')}</div>`;
   }
   if (est.buscando) {
     return `<div class="dom-buscando">🔍 Buscando domiciliario...</div>`;
@@ -989,16 +1011,16 @@ function render(){
     const idxActual = orden.indexOf(p.estado);
     return `
     <div class="card">
-      <div class="pid">#${p.id}</div>
-      <div class="rest-tag">🍽️ ${p.restaurante_nombre||'—'}</div>
-      <div class="hora">🕐 ${p.hora||''}</div>
+      <div class="pid">#${esc(p.id)}</div>
+      <div class="rest-tag">🍽️ ${esc(p.restaurante_nombre||'—')}</div>
+      <div class="hora">🕐 ${esc(p.hora||'')}</div>
       <div class="tipo-tag">${p.tipo==='domicilio'?'🛵 Domicilio':'🏠 Recoger'}</div>
-      <div class="cli">📱 ${p.numero_cliente}</div>
-      ${p.cliente_nombre?`<div class="cli-nombre">👤 ${p.cliente_nombre}</div>`:''}
-      <div class="dir">📍 ${p.direccion}</div>
-      <div class="resumen">${p.resumen||''}</div>
-      ${p.modificaciones&&p.modificaciones.length?`<div class="mods"><strong>📝 Modificaciones:</strong><br>${p.modificaciones.join('<br>')}</div>`:''}
-      ${p.quejas&&p.quejas.length?`<div class="quejas-box"><strong>⚠️ Quejas:</strong><br>${p.quejas.join('<br>')}</div>`:''}
+      <div class="cli">📱 ${esc(p.numero_cliente)}</div>
+      ${p.cliente_nombre?`<div class="cli-nombre">👤 ${esc(p.cliente_nombre)}</div>`:''}
+      <div class="dir">📍 ${esc(p.direccion)}</div>
+      <div class="resumen">${esc(p.resumen||'')}</div>
+      ${p.modificaciones&&p.modificaciones.length?`<div class="mods"><strong>📝 Modificaciones:</strong><br>${p.modificaciones.map(esc).join('<br>')}</div>`:''}
+      ${p.quejas&&p.quejas.length?`<div class="quejas-box"><strong>⚠️ Quejas:</strong><br>${p.quejas.map(esc).join('<br>')}</div>`:''}
       <div class="est-lbl ${p.estado}">${EST_MAP[p.estado]||p.estado}</div>
       ${!esFinal ? htmlBotonDom(p) : ''}
       <div class="ebts">${BTNS.map(b=>{
@@ -1290,6 +1312,12 @@ async def verificar_webhook(request: Request):
 
 @app.post("/webhook")
 async def recibir_mensaje(request: Request):
+    raw_body = await request.body()
+    firma = request.headers.get("x-hub-signature-256", "")
+    if not verificar_firma_webhook(raw_body, firma):
+        print("🚫 Webhook rechazado: firma inválida (posible mensaje falsificado)")
+        raise HTTPException(status_code=403, detail="Firma inválida")
+
     data = await request.json()
     print("DATOS:", data)
     try:
@@ -1883,5 +1911,3 @@ input:focus{border-color:#FFC107}button{width:100%;padding:12px;background:#FFC1
 </style></head><body><div class="box"><h1>⚙️ ADMIN <span>PANEL</span></h1><p>Ipiales Delivery</p>
 <form onsubmit="e=event;e.preventDefault();window.location.href='/admin?pw='+encodeURIComponent(document.getElementById('pw').value)">
 <input type="password" id="pw" placeholder="Contraseña admin" autofocus><button type="submit">Entrar</button></form></div></body></html>""")
-
-
