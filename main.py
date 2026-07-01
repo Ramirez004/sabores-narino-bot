@@ -1174,7 +1174,13 @@ async def aceptar_pedido_dom(request: Request):
                 f"*{nombre}* está en camino con tu pedido.\n"
                 f"¡Prepárate para recibirlo! 🍔")
         return {"ok": True}
-    except Exception:
+    except Exception as e:
+        # Si "asignaciones.pedido_id" tiene una restricción UNIQUE en Supabase,
+        # dos domiciliarios aceptando al mismo tiempo terminan aquí: uno gana la
+        # inserción y el otro recibe este error de duplicado en vez de asignarse igual.
+        error_txt = str(e).lower()
+        if "duplicate" in error_txt or "unique" in error_txt or "23505" in error_txt:
+            return {"ok": False, "msg": "Este pedido ya fue tomado por otro domiciliario"}
         traceback.print_exc()
         return {"ok": False, "msg": "Error al asignar"}
 
@@ -1835,3 +1841,4 @@ input:focus{border-color:#FFC107}button{width:100%;padding:12px;background:#FFC1
 </style></head><body><div class="box"><h1>⚙️ ADMIN <span>PANEL</span></h1><p>Ipiales Delivery</p>
 <form onsubmit="e=event;e.preventDefault();window.location.href='/admin?pw='+encodeURIComponent(document.getElementById('pw').value)">
 <input type="password" id="pw" placeholder="Contraseña admin" autofocus><button type="submit">Entrar</button></form></div></body></html>""")
+
