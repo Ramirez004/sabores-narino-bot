@@ -30,6 +30,16 @@ ZONA_HORARIA  = pytz.timezone("America/Bogota")
 
 historial               = {}
 mensajes_procesados     = set()
+
+# ── RATE LIMITING ─────────────────────────────────────────────────────────────
+# numero -> lista de timestamps de mensajes recientes
+_rate_limit_timestamps  = {}
+# numero -> timestamp hasta cuando está bloqueado
+_rate_limit_bloqueados  = {}
+RATE_LIMIT_MAX_MENSAJES = 10    # máximo mensajes por ventana
+RATE_LIMIT_VENTANA_SEG  = 60    # ventana en segundos
+RATE_LIMIT_BLOQUEO_SEG  = 60    # tiempo de bloqueo en segundos
+MAX_CHARS_MENSAJE       = 500   # máximo caracteres por mensaje
 clientes_esperando_decision = {}
 cliente_restaurante     = {}
 clientes_eligiendo      = {}
@@ -415,6 +425,50 @@ def set_disponible_domiciliario(telefono, disponible):
         supabase.table("domiciliarios").update({"disponible": disponible}).eq("telefono", telefono).execute()
     except Exception:
         traceback.print_exc()
+
+def verificar_rate_limit(numero):
+    """Verifica si el número puede enviar mensajes.
+    Retorna (permitido, mensaje_error)"""
+    ahora = datetime.now(ZONA_HORARIA).timestamp()
+
+    # ¿Está bloqueado temporalmente?
+    if numero in _rate_limit_bloqueados:
+        hasta = _rate_limit_bloqueados[numero]
+        if ahora < hasta:
+            segundos_restantes = int(hasta - ahora)
+            return False, (
+                f"⏳ Demasiados mensajes seguidos. "
+                f"Por favor espera {segundos_restantes} segundos antes de escribir de nuevo."
+            )
+        else:
+            del _rate_limit_bloqueados[numero]
+
+    # Limpiar timestamps viejos
+    if numero not in _rate_limit_timestamps:
+        _rate_limit_timestamps[numero] = []
+    _rate_limit_timestamps[numero] = [
+        t for t in _rate_limit_timestamps[numero]
+        if ahora - t < RATE_LIMIT_VENTANA_SEG
+    ]
+
+    # Verificar límite
+    if len(_rate_limit_timestamps[numero]) >= RATE_LIMIT_MAX_MENSAJES:
+        _rate_limit_bloqueados[numero] = ahora + RATE_LIMIT_BLOQUEO_SEG
+        _rate_limit_timestamps[numero] = []
+        return False, (
+            f"⏳ Enviaste demasiados mensajes seguidos. "
+            f"Por favor espera {RATE_LIMIT_BLOQUEO_SEG} segundos."
+        )
+
+    # Registrar este mensaje
+    _rate_limit_timestamps[numero].append(ahora)
+
+    # Limpiar memoria si hay muchos números (máx 1000)
+    if len(_rate_limit_timestamps) > 1000:
+        _rate_limit_timestamps.clear()
+
+    return True, None
+
 
 def procesar_mensaje_domiciliario(numero, texto):
     """Maneja mensajes de domiciliarios (entro turno / salgo turno).
@@ -1129,6 +1183,19 @@ async def recibir_mensaje(request: Request):
         texto   = mensaje["text"]["body"]
         texto_lower = texto.strip().lower()
         print(f"De {numero}: {texto}")
+
+        # ── RATE LIMITING (solo clientes, no admin ni domiciliarios) ──
+        if numero != ADMIN_NUMBER:
+            dom = get_domiciliario_by_telefono(numero)
+            if not dom:
+                permitido, msg_error = verificar_rate_limit(numero)
+                if not permitido:
+                    enviar_whatsapp(numero, msg_error)
+                    return {"status": "ok"}
+                # Truncar mensajes muy largos
+                if len(texto) > MAX_CHARS_MENSAJE:
+                    texto = texto[:MAX_CHARS_MENSAJE]
+                    texto_lower = texto.strip().lower()
 
         # ── DOMICILIARIO ──
         resp_dom = procesar_mensaje_domiciliario(numero, texto)
