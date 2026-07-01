@@ -70,7 +70,7 @@ h1{font-size:1.3rem;color:#222}h1 span{display:block;font-size:.75rem;font-weigh
     <h1>🍽️ {{NOMBRE_RESTAURANTE}}<span>Panel de tu restaurante</span></h1>
     <div class="btns">
       <button class="btn btn-dark" onclick="cargarTodo()">🔄 Actualizar</button>
-      <button class="btn btn-out" onclick="window.location.href='/panel-restaurante'">Salir</button>
+      <button class="btn btn-out" onclick="cerrarSesion()">🔒 Cerrar sesión</button>
     </div>
   </div>
   <div class="stats">
@@ -126,15 +126,19 @@ h1{font-size:1.3rem;color:#222}h1 span{display:block;font-size:.75rem;font-weigh
 <div class="toast" id="toast"></div>
 
 <script>
-const pw="{{PW}}";
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function toast(msg,tipo){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show';setTimeout(()=>t.className='toast',2500);}
+
+async function cerrarSesion(){
+  await fetch('/panel-restaurante/logout',{method:'POST'});
+  window.location.href='/panel-restaurante';
+}
 
 let todos=[], tabActual="todos", estadoActual={};
 
 async function cargarTodo(){
   try{
-    const r=await fetch(`/api/restaurante-panel/pedidos?pw=${encodeURIComponent(pw)}`);
+    const r=await fetch('/api/restaurante-panel/pedidos');
     if(r.status===403){window.location.href='/panel-restaurante';return;}
     const d=await r.json();
     todos=d.pedidos||[];
@@ -202,7 +206,7 @@ function toggleDomicilio(){
   document.getElementById('toggle-dom-lbl').textContent=activo?'Activo':'Desactivado';
 }
 async function abrirForzadoHoy(){
-  const r=await fetch('/api/restaurante-panel/configuracion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pw,abierto_forzado:true})});
+  const r=await fetch('/api/restaurante-panel/configuracion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({abierto_forzado:true})});
   const d=await r.json();
   if(d.ok){toast('✅ Abierto hoy');cargarTodo();}else{toast(d.msg||'Error');}
 }
@@ -212,7 +216,7 @@ async function guardarConfiguracion(){
   const notas=document.getElementById('f-notas').value.split('\n').map(n=>n.trim()).filter(n=>n);
   const r=await fetch('/api/restaurante-panel/configuracion',{
     method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({pw,domicilio_activo,tiempo_espera:espera===''?null:parseInt(espera),notas})
+    body:JSON.stringify({domicilio_activo,tiempo_espera:espera===''?null:parseInt(espera),notas})
   });
   const d=await r.json();
   if(d.ok){toast('✅ Guardado');cargarTodo();}else{toast(d.msg||'Error al guardar');}
@@ -241,7 +245,7 @@ async function buscarDomiciliario(id){
   if(btn){btn.disabled=true;btn.textContent="🔍 Buscando...";}
   try{
     const r=await fetch(`/api/restaurante-panel/pedidos/${id}/buscar-domiciliario`,{
-      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pw})
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})
     });
     const d=await r.json();
     if(!d.ok){alert(d.msg||"No se pudo buscar domiciliario");}
@@ -253,7 +257,7 @@ async function buscarDomiciliario(id){
 }
 
 async function cambiarEstado(id,estado){
-  await fetch(`/api/restaurante-panel/pedidos/${id}/estado`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pw,estado})});
+  await fetch(`/api/restaurante-panel/pedidos/${id}/estado`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({estado})});
   cargarTodo();
 }
 
