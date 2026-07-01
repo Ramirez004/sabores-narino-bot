@@ -6,7 +6,7 @@
 <title>Panel Admin — Ipiales Delivery</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-:root{--bg:#0f0f0f;--surface:#1a1a1a;--surface2:#222;--border:#333;--accent:#FFC107;--accent2:#F57C00;--text:#fff;--text2:#aaa;--red:#f44336;--green:#4CAF50;--blue:#2196F3}
+:root{--bg:#0B1512;--surface:#132420;--surface2:#1C332C;--border:#25423A;--accent:#2FA579;--accent2:#1F7A5C;--text:#EDF2F0;--text2:#8FA79C;--red:#E5484D;--green:#34C77B;--blue:#3FA0A0}
 body{font-family:'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
 /* LAYOUT */
 .layout{display:flex;min-height:100vh}
@@ -55,7 +55,9 @@ tr:hover td{background:var(--surface2)}
 .badge-yellow{background:rgba(255,193,7,.2);color:var(--accent)}
 /* MODAL */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:999;padding:20px}
-.modal{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:24px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto}
+.modal{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:24px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto}
+.modal-close{position:absolute;top:14px;right:14px;width:28px;height:28px;border:none;border-radius:50%;background:var(--surface2);color:var(--text2);font-size:1.2rem;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.modal-close:hover{background:var(--border);color:var(--text)}
 .modal h3{font-size:1.1rem;margin-bottom:18px;font-weight:700}
 .form-group{margin-bottom:14px}
 .form-group label{display:block;font-size:.78rem;color:var(--text2);margin-bottom:6px;font-weight:600}
@@ -222,7 +224,10 @@ tr:hover td{background:var(--surface2)}
 
 <!-- MODALES -->
 <div id="modal-overlay" class="modal-overlay" style="display:none" onclick="if(event.target===this)cerrarModal()">
-  <div class="modal" id="modal-content"></div>
+  <div class="modal">
+    <button class="modal-close" onclick="cerrarModal()" aria-label="Cerrar">&times;</button>
+    <div id="modal-content"></div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -321,10 +326,12 @@ async function cargarRestaurantes() {
       <td style="color:var(--text2);font-size:.8rem">${esc(r.direccion||"—")}</td>
       <td style="font-size:.8rem">${esc(r.hora_inicio)}:00 – ${esc(r.hora_fin)}:00</td>
       <td><span class="badge ${r.activo?"badge-green":"badge-red"}">${r.activo?"Activo":"Bloqueado"}</span></td>
-      <td style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn btn-ghost btn-sm" onclick="abrirModalRestaurante(${JSON.stringify(r).replace(/"/g,"&quot;")})">✏️ Editar</button>
-        <button class="btn btn-${r.activo?"danger":"success"} btn-sm" onclick="toggleRestaurante('${r.id}',${!r.activo})">${r.activo?"🚫 Bloquear":"✅ Activar"}</button>
-        <button class="btn btn-danger btn-sm" onclick="eliminarRestaurante('${r.id}','${esc(r.nombre)}')">🗑️</button>
+      <td>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" onclick="abrirModalRestaurante(${JSON.stringify(r).replace(/"/g,"&quot;")})">✏️ Editar</button>
+          <button class="btn btn-${r.activo?"danger":"success"} btn-sm" onclick="toggleRestaurante('${r.id}',${!r.activo})">${r.activo?"🚫 Bloquear":"✅ Activar"}</button>
+          <button class="btn btn-danger btn-sm" title="Eliminar" onclick="eliminarRestaurante('${r.id}','${esc(r.nombre)}')">🗑️</button>
+        </div>
       </td>
     </tr>
   `).join("");
@@ -393,13 +400,15 @@ async function cargarMenu() {
   tbody.innerHTML = d.data.map(item => `
     <tr>
       <td><span class="badge badge-yellow">${esc(item.categoria)}</span></td>
-      <td style="font-size:.8rem;max-width:300px;color:var(--text2)">${esc(item.descripcion.substring(0,80))}${item.descripcion.length>80?"...":""}</td>
+      <td style="font-size:.8rem;max-width:300px;color:var(--text2);white-space:normal;word-break:break-word">${esc(item.descripcion.substring(0,80))}${item.descripcion.length>80?"...":""}</td>
       <td>
         <div class="toggle-sm ${item.activo?"on":""}" onclick="toggleItem(${item.id},${!item.activo})"><div class="knob"></div></div>
       </td>
-      <td style="display:flex;gap:6px">
-        <button class="btn btn-ghost btn-sm" onclick="abrirModalItem(${JSON.stringify(item).replace(/"/g,"&quot;")})">✏️</button>
-        <button class="btn btn-danger btn-sm" onclick="eliminarItem(${item.id})">🗑️</button>
+      <td>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" title="Editar" onclick="abrirModalItem(${JSON.stringify(item).replace(/"/g,"&quot;")})">✏️</button>
+          <button class="btn btn-danger btn-sm" title="Eliminar" onclick="eliminarItem(${item.id})">🗑️</button>
+        </div>
       </td>
     </tr>
   `).join("");
@@ -466,9 +475,11 @@ async function cargarDomiciliarios() {
       <td><span class="badge badge-yellow">${esc(dom.pin||"—")}</span></td>
       <td><span class="badge ${dom.disponible?"badge-green":"badge-red"}">${dom.disponible?"En turno":"Fuera"}</span></td>
       <td><div class="toggle-sm ${dom.activo?"on":""}" onclick="toggleDom(${dom.id},${!dom.activo})"><div class="knob"></div></div></td>
-      <td style="display:flex;gap:6px">
-        <button class="btn btn-ghost btn-sm" onclick="abrirModalDom(${JSON.stringify(dom).replace(/"/g,"&quot;")})">✏️</button>
-        <button class="btn btn-danger btn-sm" onclick="eliminarDom(${dom.id},'${esc(dom.nombre)}')">🗑️</button>
+      <td>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" title="Editar" onclick="abrirModalDom(${JSON.stringify(dom).replace(/"/g,"&quot;")})">✏️</button>
+          <button class="btn btn-danger btn-sm" title="Eliminar" onclick="eliminarDom(${dom.id},'${esc(dom.nombre)}')">🗑️</button>
+        </div>
       </td>
     </tr>
   `).join("");
