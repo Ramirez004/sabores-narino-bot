@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import PlainTextResponse, HTMLResponse
+from fastapi.responses import PlainTextResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-import anthropic, requests, os, traceback, uuid, re, unicodedata, hmac, hashlib
+import anthropic, requests, os, traceback, uuid, re, unicodedata, hmac, hashlib, time
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, date
 import pytz
@@ -1869,9 +1869,28 @@ async def recibir_mensaje(request: Request):
 # ══════════════════════════════════════════════════════════════════════════════
 
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin2024")
+ADMIN_SESSION_DIAS = 7
 
-def check_admin(pw: str):
-    if pw != ADMIN_PASSWORD:
+def generar_token_admin():
+    expira = int(time.time()) + ADMIN_SESSION_DIAS * 86400
+    firma = hmac.new(SESSION_SECRET.encode(), f"admin:{expira}".encode(), hashlib.sha256).hexdigest()
+    return f"{expira}.{firma}"
+
+def verificar_token_admin(token):
+    if not token or "." not in token:
+        return False
+    try:
+        expira_str, firma = token.split(".", 1)
+        expira = int(expira_str)
+    except ValueError:
+        return False
+    if time.time() > expira:
+        return False
+    firma_esperada = hmac.new(SESSION_SECRET.encode(), f"admin:{expira}".encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(firma_esperada, firma)
+
+def check_admin(request: Request):
+    if not verificar_token_admin(request.cookies.get("admin_session", "")):
         raise HTTPException(status_code=403, detail="No autorizado")
 
 def get_restaurante_key_por_password(pw):
@@ -1886,8 +1905,8 @@ def get_restaurante_key_por_password(pw):
 # ── APIs ADMIN: RESTAURANTES ──────────────────────────────────────────────────
 
 @app.get("/api/admin/restaurantes")
-async def admin_get_restaurantes(pw: str = ""):
-    check_admin(pw)
+async def admin_get_restaurantes(request: Request):
+    check_admin(request)
     try:
         res = supabase.table("restaurantes").select("*").order("nombre").execute()
         return {"ok": True, "data": res.data or []}
@@ -1897,7 +1916,7 @@ async def admin_get_restaurantes(pw: str = ""):
 @app.post("/api/admin/restaurantes")
 async def admin_crear_restaurante(request: Request):
     body = await request.json()
-    check_admin(body.get("pw", ""))
+    check_admin(request)
     try:
         r = {
             "id": body["id"].lower().replace(" ", "_"),
@@ -1920,7 +1939,7 @@ async def admin_crear_restaurante(request: Request):
 @app.put("/api/admin/restaurantes/{rest_id}")
 async def admin_editar_restaurante(rest_id: str, request: Request):
     body = await request.json()
-    check_admin(body.get("pw", ""))
+    check_admin(request)
     try:
         datos = {k: v for k, v in body.items() if k not in ["pw", "id"]}
         if "hora_inicio" in datos: datos["hora_inicio"] = int(datos["hora_inicio"])
@@ -1932,8 +1951,8 @@ async def admin_editar_restaurante(rest_id: str, request: Request):
         return {"ok": False, "msg": str(e)}
 
 @app.delete("/api/admin/restaurantes/{rest_id}")
-async def admin_eliminar_restaurante(rest_id: str, pw: str = ""):
-    check_admin(pw)
+async def admin_eliminar_restaurante(rest_id: str, request: Request):
+    check_admin(request)
     try:
         supabase.table("menu_items").delete().eq("restaurante_id", rest_id).execute()
         supabase.table("restaurantes").delete().eq("id", rest_id).execute()
@@ -1941,13 +1960,16 @@ async def admin_eliminar_restaurante(rest_id: str, pw: str = ""):
         cargar_menu()
         return {"ok": True}
     except Exception as e:
+        error_txt = str(e).lower()
+        if "foreign key" in error_txt or "still referenced" in error_txt:
+            return {"ok": False, "msg": "No se puede eliminar: este restaurante ya tiene pedidos guardados en su historial. Usa 'Bloquear' en vez de 'Eliminar' para desactivarlo sin perder ese historial."}
         return {"ok": False, "msg": str(e)}
 
 # ── APIs ADMIN: MENÚ ──────────────────────────────────────────────────────────
 
 @app.get("/api/admin/menu/{rest_id}")
-async def admin_get_menu(rest_id: str, pw: str = ""):
-    check_admin(pw)
+async def admin_get_menu(rest_id: str, request: Request):
+    check_admin(request)
     try:
         res = supabase.table("menu_items").select("*").eq("restaurante_id", rest_id).order("categoria").execute()
         return {"ok": True, "data": res.data or []}
@@ -1957,7 +1979,7 @@ async def admin_get_menu(rest_id: str, pw: str = ""):
 @app.post("/api/admin/menu")
 async def admin_crear_item(request: Request):
     body = await request.json()
-    check_admin(body.get("pw", ""))
+    check_admin(request)
     try:
         item = {
             "restaurante_id": body["restaurante_id"],
@@ -1974,7 +1996,7 @@ async def admin_crear_item(request: Request):
 @app.put("/api/admin/menu/{item_id}")
 async def admin_editar_item(item_id: int, request: Request):
     body = await request.json()
-    check_admin(body.get("pw", ""))
+    check_admin(request)
     try:
         datos = {k: v for k, v in body.items() if k not in ["pw", "id"]}
         supabase.table("menu_items").update(datos).eq("id", item_id).execute()
@@ -1984,8 +2006,8 @@ async def admin_editar_item(item_id: int, request: Request):
         return {"ok": False, "msg": str(e)}
 
 @app.delete("/api/admin/menu/{item_id}")
-async def admin_eliminar_item(item_id: int, pw: str = ""):
-    check_admin(pw)
+async def admin_eliminar_item(item_id: int, request: Request):
+    check_admin(request)
     try:
         supabase.table("menu_items").delete().eq("id", item_id).execute()
         cargar_menu()
@@ -1996,8 +2018,8 @@ async def admin_eliminar_item(item_id: int, pw: str = ""):
 # ── APIs ADMIN: DOMICILIARIOS ─────────────────────────────────────────────────
 
 @app.get("/api/admin/domiciliarios")
-async def admin_get_domiciliarios(pw: str = ""):
-    check_admin(pw)
+async def admin_get_domiciliarios(request: Request):
+    check_admin(request)
     try:
         res = supabase.table("domiciliarios").select("*").order("nombre").execute()
         return {"ok": True, "data": res.data or []}
@@ -2007,7 +2029,7 @@ async def admin_get_domiciliarios(pw: str = ""):
 @app.post("/api/admin/domiciliarios")
 async def admin_crear_domiciliario(request: Request):
     body = await request.json()
-    check_admin(body.get("pw", ""))
+    check_admin(request)
     try:
         dom = {
             "nombre": body["nombre"],
@@ -2024,7 +2046,7 @@ async def admin_crear_domiciliario(request: Request):
 @app.put("/api/admin/domiciliarios/{dom_id}")
 async def admin_editar_domiciliario(dom_id: int, request: Request):
     body = await request.json()
-    check_admin(body.get("pw", ""))
+    check_admin(request)
     try:
         datos = {k: v for k, v in body.items() if k not in ["pw", "id"]}
         supabase.table("domiciliarios").update(datos).eq("id", dom_id).execute()
@@ -2033,8 +2055,8 @@ async def admin_editar_domiciliario(dom_id: int, request: Request):
         return {"ok": False, "msg": str(e)}
 
 @app.delete("/api/admin/domiciliarios/{dom_id}")
-async def admin_eliminar_domiciliario(dom_id: int, pw: str = ""):
-    check_admin(pw)
+async def admin_eliminar_domiciliario(dom_id: int, request: Request):
+    check_admin(request)
     try:
         supabase.table("asignaciones").delete().eq("domiciliario_id", dom_id).execute()
         supabase.table("domiciliarios").delete().eq("id", dom_id).execute()
@@ -2045,8 +2067,8 @@ async def admin_eliminar_domiciliario(dom_id: int, pw: str = ""):
 # ── APIs ADMIN: CLIENTES Y STATS ──────────────────────────────────────────────
 
 @app.get("/api/admin/clientes")
-async def admin_get_clientes(pw: str = ""):
-    check_admin(pw)
+async def admin_get_clientes(request: Request):
+    check_admin(request)
     try:
         res = supabase.table("clientes").select("*").order("fecha_registro", desc=True).limit(100).execute()
         return {"ok": True, "data": res.data or []}
@@ -2054,8 +2076,8 @@ async def admin_get_clientes(pw: str = ""):
         return {"ok": False, "msg": str(e)}
 
 @app.get("/api/admin/stats")
-async def admin_get_stats(pw: str = ""):
-    check_admin(pw)
+async def admin_get_stats(request: Request):
+    check_admin(request)
     try:
         pedidos_res = supabase.table("pedidos").select("*").execute()
         todos = pedidos_res.data or []
@@ -2103,11 +2125,30 @@ async def admin_get_stats(pw: str = ""):
 
 # ── PANEL ADMIN HTML ──────────────────────────────────────────────────────────
 
+@app.post("/admin/login")
+async def admin_login(request: Request):
+    body = await request.json()
+    if body.get("password", "") != ADMIN_PASSWORD:
+        return {"ok": False, "msg": "Contraseña incorrecta"}
+    resp = JSONResponse({"ok": True})
+    resp.set_cookie(
+        "admin_session", generar_token_admin(),
+        httponly=True, secure=True, samesite="strict",
+        max_age=ADMIN_SESSION_DIAS * 86400,
+    )
+    return resp
+
+@app.post("/admin/logout")
+async def admin_logout():
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie("admin_session")
+    return resp
+
 @app.get("/admin")
-async def admin_panel(pw: str = ""):
-    if pw == ADMIN_PASSWORD:
+async def admin_panel(request: Request):
+    if verificar_token_admin(request.cookies.get("admin_session", "")):
         with open(os.path.join(STATIC_DIR, "admin.html"), "r") as f:
-            return HTMLResponse(f.read().replace("{{ADMIN_PW}}", ADMIN_PASSWORD))
+            return HTMLResponse(f.read())
     return HTMLResponse("""<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Admin — Ipiales Delivery</title>
@@ -2116,6 +2157,22 @@ async def admin_panel(pw: str = ""):
 h1{font-size:1.3rem;margin-bottom:4px}h1 span{color:#FFC107}p{color:#888;margin-bottom:20px;font-size:.87rem}
 input{width:100%;padding:12px;background:#222;border:1px solid #444;border-radius:10px;color:#fff;font-size:1rem;outline:none;margin-bottom:12px}
 input:focus{border-color:#FFC107}button{width:100%;padding:12px;background:#FFC107;border:none;border-radius:10px;color:#1a1a1a;font-weight:700;font-size:1rem;cursor:pointer}
+.err{color:#f44336;font-size:.82rem;margin:-6px 0 12px;display:none}
 </style></head><body><div class="box"><h1>⚙️ ADMIN <span>PANEL</span></h1><p>Ipiales Delivery</p>
-<form onsubmit="e=event;e.preventDefault();window.location.href='/admin?pw='+encodeURIComponent(document.getElementById('pw').value)">
-<input type="password" id="pw" placeholder="Contraseña admin" autofocus><button type="submit">Entrar</button></form></div></body></html>""")
+<form id="form-login"><input type="password" id="pw" placeholder="Contraseña admin" autofocus>
+<div class="err" id="err">Contraseña incorrecta</div>
+<button type="submit">Entrar</button></form></div>
+<script>
+document.getElementById('form-login').onsubmit = async function(e) {
+  e.preventDefault();
+  const err = document.getElementById('err');
+  err.style.display = 'none';
+  try {
+    const r = await fetch('/admin/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password: document.getElementById('pw').value})});
+    const d = await r.json();
+    if (d.ok) { window.location.href = '/admin'; }
+    else { err.textContent = d.msg || 'Contraseña incorrecta'; err.style.display = 'block'; }
+  } catch (e) { err.textContent = 'Error de conexión'; err.style.display = 'block'; }
+};
+</script>
+</body></html>""")
