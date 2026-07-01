@@ -941,6 +941,9 @@ h1{font-size:1.3rem;color:#222}h1 span{display:block;font-size:.75rem;font-weigh
 </div>
 <div id="grid" class="grid"></div>
 <div id="empty" class="empty" style="display:none">No hay pedidos en esta pestaña 😊</div>
+<div style="text-align:center;margin-top:24px">
+  <a href="/" style="color:#9a8a6b;font-size:.8rem;text-decoration:none">🌐 Ver página de información de CaZa Delivery</a>
+</div>
 </div>
 <script>
 const pw="{{PW}}";
@@ -1089,7 +1092,8 @@ setInterval(cargarPedidos,6000);
 
 @app.get("/")
 async def raiz():
-    return HTMLResponse("<h1>Ipiales Delivery Bot</h1><p><a href='/panel'>Ir al panel</a></p>")
+    with open(os.path.join(STATIC_DIR, "landing.html"), "r", encoding="utf-8") as f:
+        return HTMLResponse(f.read())
 
 @app.get("/panel")
 async def panel(pw: str = ""):
