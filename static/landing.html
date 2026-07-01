@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CaZa Delivery — Pide por WhatsApp en Ipiales</title>
+<meta name="description" content="CaZa Delivery — pide tu comida favorita en Ipiales directo por WhatsApp, sin apps ni filas.">
+<style>
+  :root{
+    --bg:#F5EDE0;
+    --bg-card:#FBF6EC;
+    --text:#3E2723;
+    --accent:#6B3226;
+    --accent-light:#8B5A46;
+    --border:#E6D8C3;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    font-family:'Segoe UI', Georgia, serif;
+    background:var(--bg);
+    color:var(--text);
+    line-height:1.5;
+  }
+  .container{max-width:720px;margin:0 auto;padding:0 24px}
+
+  header.hero{
+    text-align:center;
+    padding:64px 24px 48px;
+  }
+  header.hero img{
+    max-width:280px;
+    width:100%;
+    height:auto;
+    margin-bottom:24px;
+  }
+  .tagline{
+    font-size:1.15rem;
+    color:var(--accent-light);
+    margin-bottom:32px;
+    font-style:italic;
+  }
+  .btn-whatsapp{
+    display:inline-flex;
+    align-items:center;
+    gap:10px;
+    background:var(--accent);
+    color:#fff;
+    padding:16px 32px;
+    border-radius:30px;
+    text-decoration:none;
+    font-weight:600;
+    font-size:1.05rem;
+    transition:background .2s, transform .15s;
+    box-shadow:0 6px 18px rgba(107,50,38,.25);
+  }
+  .btn-whatsapp:hover{background:var(--accent-light);transform:translateY(-2px)}
+  .btn-whatsapp svg{width:22px;height:22px;fill:#fff}
+
+  section{padding:40px 24px}
+  section h2{
+    font-size:1.5rem;
+    text-align:center;
+    margin-bottom:8px;
+    font-weight:600;
+  }
+  section p.section-sub{
+    text-align:center;
+    color:var(--accent-light);
+    font-size:.92rem;
+    margin-bottom:28px;
+  }
+
+  .restaurantes-empty{
+    background:var(--bg-card);
+    border:1px dashed var(--border);
+    border-radius:16px;
+    padding:40px 24px;
+    text-align:center;
+    color:var(--accent-light);
+  }
+  .restaurantes-empty .icon{font-size:2rem;margin-bottom:10px;display:block}
+
+  .unete-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:16px;
+  }
+  @media(max-width:560px){.unete-grid{grid-template-columns:1fr}}
+  .unete-card{
+    background:var(--bg-card);
+    border:1px solid var(--border);
+    border-radius:16px;
+    padding:28px 20px;
+    text-align:center;
+  }
+  .unete-card .icon{font-size:2.2rem;margin-bottom:10px;display:block}
+  .unete-card h3{font-size:1.05rem;margin-bottom:6px}
+  .unete-card p{font-size:.85rem;color:var(--accent-light);margin-bottom:18px}
+  .btn-secundario{
+    display:inline-block;
+    background:transparent;
+    color:var(--accent);
+    border:1.5px solid var(--accent);
+    padding:10px 20px;
+    border-radius:24px;
+    text-decoration:none;
+    font-weight:600;
+    font-size:.88rem;
+    transition:background .2s, color .2s;
+  }
+  .btn-secundario:hover{background:var(--accent);color:#fff}
+
+  footer{
+    text-align:center;
+    padding:32px 24px 48px;
+    font-size:.8rem;
+    color:var(--accent-light);
+    border-top:1px solid var(--border);
+    margin-top:24px;
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <img src="/static/logo.jpg" alt="CaZa Delivery">
+  <p class="tagline">El sabor de Ipiales, directo a tu puerta.</p>
+  <a class="btn-whatsapp" href="https://wa.me/573107349485?text=Hola%2C%20quiero%20hacer%20un%20pedido" target="_blank" rel="noopener">
+    <svg viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.263.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12.004 2.003c-5.514 0-9.997 4.483-9.997 9.997 0 1.762.464 3.484 1.346 4.997L2 22l5.13-1.345a9.96 9.96 0 0 0 4.874 1.242h.004c5.514 0 9.997-4.483 9.997-9.997 0-2.67-1.04-5.18-2.928-7.068A9.935 9.935 0 0 0 12.004 2.003zm0 18.184h-.003a8.174 8.174 0 0 1-4.166-1.14l-.299-.177-3.045.799.813-2.968-.194-.305a8.19 8.19 0 0 1-1.259-4.396c0-4.527 3.684-8.211 8.216-8.211a8.14 8.14 0 0 1 5.806 2.407 8.15 8.15 0 0 1 2.406 5.809c0 4.527-3.684 8.211-8.219 8.211z"/></svg>
+    Pedir por WhatsApp
+  </a>
+</header>
+
+<section id="restaurantes">
+  <div class="container">
+    <h2>Restaurantes disponibles</h2>
+    <p class="section-sub">Los negocios que hacen parte de CaZa Delivery</p>
+    <div class="restaurantes-empty">
+      <span class="icon">🍽️</span>
+      Muy pronto vas a ver aquí todos los restaurantes disponibles.
+    </div>
+  </div>
+</section>
+
+<section id="unete">
+  <div class="container">
+    <h2>¿Quieres ser parte de CaZa?</h2>
+    <p class="section-sub">Únete como restaurante o como domiciliario</p>
+    <div class="unete-grid">
+      <div class="unete-card">
+        <span class="icon">🏪</span>
+        <h3>Tengo un restaurante</h3>
+        <p>Llega a más clientes en Ipiales sin complicarte con apps.</p>
+        <a class="btn-secundario" href="https://wa.me/573167731698?text=Hola%2C%20quiero%20unirme%20como%20restaurante%20a%20CaZa%20Delivery" target="_blank" rel="noopener">Escríbenos</a>
+      </div>
+      <div class="unete-card">
+        <span class="icon">🛵</span>
+        <h3>Quiero ser domiciliario</h3>
+        <p>Genera ingresos entregando pedidos con horarios flexibles.</p>
+        <a class="btn-secundario" href="https://wa.me/573167731698?text=Hola%2C%20quiero%20ser%20domiciliario%20de%20CaZa%20Delivery" target="_blank" rel="noopener">Escríbenos</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  CaZa Delivery · Ipiales, Nariño
+</footer>
+
+</body>
+</html>
