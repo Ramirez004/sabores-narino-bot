@@ -48,6 +48,7 @@ RATE_LIMIT_VENTANA_SEG  = 60    # ventana en segundos
 RATE_LIMIT_BLOQUEO_SEG  = 60    # tiempo de bloqueo en segundos
 MAX_CHARS_MENSAJE       = 500   # máximo caracteres por mensaje
 clientes_esperando_decision = {}
+clientes_esperando_calificacion = {}  # numero -> pedido_id
 cliente_restaurante     = {}
 clientes_eligiendo      = {}
 # registro en pasos: numero -> {"paso": "nombre"|"direccion"}
@@ -331,6 +332,15 @@ def agregar_queja(pedido_id, texto):
         quejas = pedido.get("quejas") or []
         quejas.append(texto)
         supabase.table("pedidos").update({"quejas": quejas}).eq("id", pedido_id).execute()
+
+def guardar_calificacion(pedido_id, calificacion, comentario):
+    try:
+        datos = {"calificacion": calificacion}
+        if comentario:
+            datos["comentario_calificacion"] = comentario
+        supabase.table("pedidos").update(datos).eq("id", pedido_id).execute()
+    except Exception:
+        traceback.print_exc()
 
 def buscar_pedido_activo_cliente(numero):
     activos = get_pedidos_activos(numero)
@@ -1110,6 +1120,8 @@ async def cambiar_estado(pedido_id: str, request: Request):
         enviar_whatsapp(numero, msg)
     if nuevo == "entregado" and anterior != "entregado":
         enviar_whatsapp(numero, f"🙌 *¡Pedido entregado!* Esperamos que lo disfrutes.\n¡Gracias por elegir {nombre_rest}! 😊")
+        enviar_whatsapp(numero, "⭐ ¿Cómo calificarías el servicio? Responde del 1 al 5 (puedes agregar un comentario si quieres).")
+        clientes_esperando_calificacion[numero] = pedido_id
     if nuevo == "cancelado" and anterior != "cancelado":
         enviar_whatsapp(numero, f"❌ *Pedido #{pedido_id} cancelado.*\nSi tienes dudas contáctanos. ¡Hasta pronto! 🍔")
     return {"ok": True}
@@ -1274,6 +1286,9 @@ async def marcar_entregado_dom(request: Request):
             f"🙌 *¡Pedido #{pedido_id} entregado!*\n"
             f"Esperamos que lo disfrutes 😊\n"
             f"¡Gracias por pedir en Ipiales Delivery!")
+        enviar_whatsapp(pedido["numero_cliente"],
+            "⭐ ¿Cómo calificarías el servicio? Responde del 1 al 5 (puedes agregar un comentario si quieres).")
+        clientes_esperando_calificacion[pedido["numero_cliente"]] = pedido_id
         enviar_whatsapp(ADMIN_NUMBER,
             f"✅ *Pedido #{pedido_id} entregado*\n🛵 Por: {nombre}")
     # Actualizar contador domiciliario
@@ -1383,6 +1398,19 @@ async def recibir_mensaje(request: Request):
             if resp_admin:
                 enviar_whatsapp(numero, resp_admin)
                 return {"status": "ok"}
+
+        # ── CALIFICACIÓN DE SERVICIO ───────────────────────────────────────────
+        if numero in clientes_esperando_calificacion:
+            m = re.match(r"^\s*([1-5])(?:\s+(.*))?$", texto.strip(), re.DOTALL)
+            if m:
+                pedido_id_cal = clientes_esperando_calificacion.pop(numero)
+                calificacion = int(m.group(1))
+                comentario = (m.group(2) or "").strip() or None
+                guardar_calificacion(pedido_id_cal, calificacion, comentario)
+                enviar_whatsapp(numero, "¡Gracias por tu calificación! 🙏" + (" Tomamos nota de tu comentario." if comentario else ""))
+                return {"status": "ok"}
+            # Si no es un número del 1 al 5, no bloqueamos nada: dejamos la espera
+            # activa y el mensaje sigue su flujo normal (ej. el cliente quiere pedir de nuevo).
 
         # ── REGISTRO DE CLIENTE ───────────────────────────────────────────────
         if numero in clientes_registrando:
@@ -1889,6 +1917,17 @@ async def admin_get_stats(pw: str = ""):
             r = p.get("restaurante_nombre", "Sin nombre")
             por_rest[r] = por_rest.get(r, 0) + 1
 
+        # Calificación promedio por restaurante
+        calificaciones_por_rest = {}
+        for p in todos:
+            cal = p.get("calificacion")
+            if cal:
+                r = p.get("restaurante_nombre", "Sin nombre")
+                calificaciones_por_rest.setdefault(r, []).append(cal)
+        promedio_calificacion_por_rest = {
+            r: round(sum(vals) / len(vals), 1) for r, vals in calificaciones_por_rest.items()
+        }
+
         return {
             "ok": True,
             "stats": {
@@ -1899,6 +1938,7 @@ async def admin_get_stats(pw: str = ""):
                 "total_restaurantes": len(rests_res.data or []),
                 "domiciliarios_disponibles": len([d for d in (doms_res.data or []) if d.get("disponible")]),
                 "pedidos_por_restaurante": por_rest,
+                "promedio_calificacion_por_restaurante": promedio_calificacion_por_rest,
             }
         }
     except Exception as e:
