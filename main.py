@@ -101,6 +101,18 @@ def get_cliente(numero):
 
 def crear_cliente(numero, nombre, direccion):
     try:
+        # Bug 5 fix: verificar si ya existe antes de insertar (evita duplicados)
+        existente = get_cliente(numero)
+        if existente:
+            # Ya existe, solo actualizar nombre y dirección si están vacíos
+            actualizaciones = {}
+            if not existente.get("nombre") and nombre:
+                actualizaciones["nombre"] = nombre
+            if not existente.get("direccion") and direccion:
+                actualizaciones["direccion"] = direccion
+            if actualizaciones:
+                supabase.table("clientes").update(actualizaciones).eq("numero", numero).execute()
+            return
         supabase.table("clientes").insert({
             "numero": numero,
             "nombre": nombre,
@@ -282,12 +294,27 @@ def buscar_pedido_activo_cliente(numero):
         return None
     p = activos[0]
     try:
-        hora_pedido = datetime.fromisoformat(p["fecha"]).replace(tzinfo=ZONA_HORARIA)
-        if (datetime.now(ZONA_HORARIA) - hora_pedido) <= timedelta(minutes=INTERVALO_CORTO_MINUTOS):
+        fecha_str = p["fecha"]
+        # Supabase devuelve timestamps en UTC con +00:00 o Z
+        # Convertimos correctamente a Colombia para comparar
+        if fecha_str.endswith("Z"):
+            fecha_str = fecha_str.replace("Z", "+00:00")
+        hora_pedido = datetime.fromisoformat(fecha_str)
+        # Si no tiene zona horaria, asumimos UTC
+        if hora_pedido.tzinfo is None:
+            import pytz as _pytz
+            hora_pedido = _pytz.utc.localize(hora_pedido)
+        # Convertir a Colombia
+        hora_pedido_col = hora_pedido.astimezone(ZONA_HORARIA)
+        ahora_col = datetime.now(ZONA_HORARIA)
+        if (ahora_col - hora_pedido_col) <= timedelta(minutes=INTERVALO_CORTO_MINUTOS):
             return p
-    except Exception:
+        # Si es más viejo de 15 min, solo retorna si sigue activo/preparando
+        # (para que el cliente no quede bloqueado indefinidamente)
         return p
-    return p
+    except Exception:
+        traceback.print_exc()
+        return p
 
 # ── HELPERS RESTAURANTES ──────────────────────────────────────────────────────
 
@@ -343,7 +370,9 @@ INSTRUCCIONES:
 - NUNCA muestres resumen ni total hasta que el cliente diga "es todo", "listo", "eso sería" o similar.
 - Solo entonces muestra resumen completo con total.
 - Si el cliente mencionó lugar de entrega, es domicilio. Confirma la dirección.
-- Al confirmar el pedido di EXACTAMENTE: "✅ *Pedido recibido* Estamos preparando tu pedido y pronto te avisamos 🍔" — NO digas "en camino" ni "listo para recoger" porque eso lo decide el restaurante.
+- Al confirmar el pedido SIEMPRE termina con esta frase EXACTA en una línea separada: "✅ Pedido recibido. Estamos preparando tu pedido 🍔"
+- NUNCA uses frases como "en camino", "listo para recoger", "pasamos a preparar" — eso lo decide el restaurante, no tú.
+- Esta frase de confirmación es OBLIGATORIA cada vez que el cliente confirme un pedido.
 - No inventes productos ni precios.
 - Si el cliente pregunta por otros restaurantes, quiere cambiar de restaurante, o pide ver la lista de restaurantes, responde EXACTAMENTE: "Claro 😊 Escribe *restaurantes* para ver todos los restaurantes disponibles."
 - NO digas que solo eres asistente de este restaurante. El cliente puede cambiar cuando quiera.
@@ -1313,7 +1342,9 @@ async def recibir_mensaje(request: Request):
 
             cliente_restaurante[numero] = rest_key
             clientes_eligiendo.pop(numero, None)
+            # Bug 1 fix: limpiar TODO el estado anterior al entrar a un restaurante nuevo
             historial[numero] = []
+            clientes_esperando_decision.pop(numero, None)
             r = _cache_restaurantes[rest_key]
             nombre_cli = cliente["nombre"] if cliente else ""
             enviar_whatsapp(numero,
@@ -1476,7 +1507,13 @@ async def recibir_mensaje(request: Request):
         enviar_whatsapp(numero, texto_respuesta)
 
         # Detectar cierre de pedido
-        palabras_cierre = ["pedido recibido", "en camino", "listo para recoger", "pasamos a preparar", "empezamos a preparar", "estamos preparando"]
+        palabras_cierre = [
+            "pedido recibido", "en camino", "listo para recoger",
+            "pasamos a preparar", "empezamos a preparar", "estamos preparando",
+            "pedido confirmado", "recibimos tu pedido", "ya recibimos",
+            "tu pedido está", "hemos recibido tu pedido", "pedido anotado",
+            "anotamos tu pedido", "ya está anotado"
+        ]
         es_cierre = any(p in texto_respuesta.lower() for p in palabras_cierre)
 
         if es_cierre:
