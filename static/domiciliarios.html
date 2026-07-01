@@ -69,6 +69,8 @@
 <script>
 const API = "";
 let domiciliario = localStorage.getItem("dom_nombre") || "";
+let domId = localStorage.getItem("dom_id") || "";
+let domToken = localStorage.getItem("dom_token") || "";
 let polling = null;
 
 function toast(msg) {
@@ -78,20 +80,29 @@ function toast(msg) {
   setTimeout(() => t.classList.remove("show"), 2500);
 }
 
-function renderLogin() {
+async function renderLogin() {
   document.getElementById("app").innerHTML = `
     <div class="login-box">
       <h1>🛵 Domiciliarios</h1>
       <p>Ipiales Delivery</p>
       <select id="sel-nombre">
-        <option value="">Selecciona tu nombre</option>
-        <option value="Damian">Damian</option>
+        <option value="">Cargando...</option>
       </select>
       <input type="password" id="inp-pin" placeholder="PIN de 6 dígitos" inputmode="numeric" maxlength="6">
       <div class="login-error" id="login-error">PIN incorrecto</div>
       <button onclick="entrar()">Entrar</button>
     </div>
   `;
+  try {
+    const r = await fetch(`${API}/api/domiciliarios/lista`);
+    const d = await r.json();
+    const nombres = d.nombres || [];
+    const sel = document.getElementById("sel-nombre");
+    sel.innerHTML = '<option value="">Selecciona tu nombre</option>' +
+      nombres.map(n => `<option value="${n}">${n}</option>`).join("");
+  } catch (e) {
+    toast("No se pudo cargar la lista de domiciliarios");
+  }
 }
 
 async function entrar() {
@@ -110,8 +121,12 @@ async function entrar() {
     });
     const d = await r.json();
     if (d.ok) {
-      localStorage.setItem("dom_nombre", nombre);
-      domiciliario = nombre;
+      localStorage.setItem("dom_nombre", d.nombre);
+      localStorage.setItem("dom_id", d.dom_id);
+      localStorage.setItem("dom_token", d.token);
+      domiciliario = d.nombre;
+      domId = d.dom_id;
+      domToken = d.token;
       renderApp();
     } else {
       err.textContent = d.msg || "PIN incorrecto";
@@ -124,7 +139,11 @@ async function entrar() {
 
 function logout() {
   localStorage.removeItem("dom_nombre");
+  localStorage.removeItem("dom_id");
+  localStorage.removeItem("dom_token");
   domiciliario = "";
+  domId = "";
+  domToken = "";
   if (polling) clearInterval(polling);
   renderLogin();
 }
@@ -185,8 +204,8 @@ let stats = { pedidos_hoy: 0 };
 async function cargarDatos() {
   try {
     const [rPend, rMios] = await Promise.all([
-      fetch(`${API}/api/domiciliario/pedidos-pendientes?nombre=${encodeURIComponent(domiciliario)}`),
-      fetch(`${API}/api/domiciliario/mis-pedidos?nombre=${encodeURIComponent(domiciliario)}`)
+      fetch(`${API}/api/domiciliario/pedidos-pendientes?dom_id=${encodeURIComponent(domId)}&token=${encodeURIComponent(domToken)}`),
+      fetch(`${API}/api/domiciliario/mis-pedidos?dom_id=${encodeURIComponent(domId)}&token=${encodeURIComponent(domToken)}`)
     ]);
     const dPend = await rPend.json();
     const dMios = await rMios.json();
@@ -201,7 +220,7 @@ function toggleDisponible() {
   disponible = !disponible;
   fetch(`${API}/api/domiciliario/disponibilidad`, {
     method: "POST", headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({ nombre: domiciliario, disponible })
+    body: JSON.stringify({ dom_id: domId, token: domToken, disponible })
   });
   render();
   if (disponible) cargarDatos();
@@ -210,7 +229,7 @@ function toggleDisponible() {
 async function aceptarPedido(pedidoId) {
   const r = await fetch(`${API}/api/domiciliario/aceptar`, {
     method: "POST", headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({ nombre: domiciliario, pedido_id: pedidoId })
+    body: JSON.stringify({ dom_id: domId, token: domToken, pedido_id: pedidoId })
   });
   const d = await r.json();
   if (d.ok) {
@@ -226,7 +245,7 @@ async function marcarEntregado(pedidoId) {
   if (!confirm("¿Confirmas que entregaste este pedido?")) return;
   await fetch(`${API}/api/domiciliario/entregado`, {
     method: "POST", headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({ nombre: domiciliario, pedido_id: pedidoId })
+    body: JSON.stringify({ dom_id: domId, token: domToken, pedido_id: pedidoId })
   });
   toast("🙌 ¡Pedido entregado!");
   cargarDatos();
@@ -291,10 +310,11 @@ function render() {
   `;
 }
 
-if (domiciliario) {
+if (domiciliario && domId && domToken) {
   renderApp();
 } else {
-  renderLogin();
+  // Sesión de una versión anterior sin token, o nunca inició sesión: pide login de nuevo.
+  logout();
 }
 </script>
 </body>
