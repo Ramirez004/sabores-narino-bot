@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import PlainTextResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-import anthropic, requests, os, traceback, uuid, re
+import anthropic, requests, os, traceback, uuid, re, unicodedata, hmac, hashlib
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 import pytz
@@ -22,6 +22,9 @@ VERIFY_TOKEN    = os.getenv("VERIFY_TOKEN")
 PANEL_PASSWORD  = os.getenv("PANEL_PASSWORD", "ipiales2024")
 SUPABASE_URL    = os.getenv("SUPABASE_URL")
 SUPABASE_KEY    = os.getenv("SUPABASE_KEY")
+# Secreto para firmar los tokens de sesión de domiciliarios. Defínelo en Railway
+# como variable de entorno propia (una cadena aleatoria larga) en vez de usar el fallback.
+SESSION_SECRET  = os.getenv("SESSION_SECRET", PANEL_PASSWORD + "_dom_session_v1")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -78,8 +81,12 @@ cargar_menu()
 
 # Estado en memoria (domicilio forzado, espera, categorías desactivadas, notas)
 # Se resetean si Railway reinicia, pero son cosas operativas del día
-_estado_extra = {
-    key: {
+# defaultdict: cualquier restaurante nuevo (creado luego desde el panel admin)
+# recibe automáticamente sus valores por defecto en lugar de lanzar KeyError.
+from collections import defaultdict
+
+def _estado_extra_default():
+    return {
         "domicilio_activo": True,
         "tiempo_espera": None,
         "categorias_desactivadas": set(),
@@ -87,8 +94,8 @@ _estado_extra = {
         "abierto_forzado": False,
         "fecha_forzado": None,
     }
-    for key in ["las_bravas", "escarabajo", "monaco"]
-}
+
+_estado_extra = defaultdict(_estado_extra_default)
 
 # ── CLIENTES SUPABASE ─────────────────────────────────────────────────────────
 
@@ -237,10 +244,13 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
 
     ahora = datetime.now(ZONA_HORARIA)
 
-    # ¿Ya tiene pedido activo? Lo actualiza
+    # ¿Ya tiene un pedido en estado "activo" (aún no aceptado)? Lo actualiza.
+    # Si el pedido activo ya está "preparando" (ya aceptado por el restaurante/domiciliario),
+    # NO se toca: se crea un pedido nuevo aparte para no perder ni retroceder el que ya está en curso.
     activos = get_pedidos_activos(numero)
-    if activos:
-        pedido_id = activos[0]["id"]
+    pedido_para_actualizar = next((p for p in activos if p["estado"] == "activo"), None)
+    if pedido_para_actualizar:
+        pedido_id = pedido_para_actualizar["id"]
         supabase.table("pedidos").update({
             "resumen": resumen,
             "total": total,
@@ -317,6 +327,10 @@ def buscar_pedido_activo_cliente(numero):
         return p
 
 # ── HELPERS RESTAURANTES ──────────────────────────────────────────────────────
+
+def normalizar_texto(s):
+    """Quita tildes y pasa a minúsculas para comparar nombres sin depender de acentos."""
+    return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii").lower()
 
 def esta_abierto(rest_key):
     r = get_restaurante(rest_key)
@@ -448,6 +462,38 @@ def get_domiciliario_by_telefono(telefono):
         return res.data[0] if res.data else None
     except Exception:
         return None
+
+def get_domiciliario_by_id(dom_id):
+    try:
+        res = supabase.table("domiciliarios").select("*").eq("id", dom_id).execute()
+        return res.data[0] if res.data else None
+    except Exception:
+        return None
+
+def get_nombres_domiciliarios_activos():
+    try:
+        res = supabase.table("domiciliarios").select("nombre").eq("activo", True).order("nombre").execute()
+        return [d["nombre"] for d in (res.data or [])]
+    except Exception:
+        traceback.print_exc()
+        return []
+
+# ── SESIÓN DOMICILIARIOS ──────────────────────────────────────────────────────
+# Token firmado (HMAC) en vez de confiar ciegamente en el nombre que manda el cliente.
+# Así, cada acción (aceptar/entregar/etc) exige haber iniciado sesión con el PIN correcto.
+
+def generar_token_dom(dom_id):
+    return hmac.new(SESSION_SECRET.encode(), str(dom_id).encode(), hashlib.sha256).hexdigest()
+
+def verificar_sesion_dom(dom_id, token):
+    if not dom_id or not token:
+        return None
+    if not hmac.compare_digest(generar_token_dom(dom_id), str(token)):
+        return None
+    dom = get_domiciliario_by_id(dom_id)
+    if not dom or not dom.get("activo", True):
+        return None
+    return dom
 
 def set_disponible_domiciliario(telefono, disponible):
     try:
@@ -614,8 +660,9 @@ def procesar_comando_admin(texto):
 
     # Identificar restaurante
     rest_key = None
+    t_normalizado = normalizar_texto(t)
     for key, r in _cache_restaurantes.items():
-        if r["nombre"].lower() in t or key.replace("_", " ") in t or key in t:
+        if normalizar_texto(r["nombre"]) in t_normalizado or key.replace("_", " ") in t or key in t:
             rest_key = key
             break
 
@@ -1037,6 +1084,12 @@ async def domiciliarios_app():
     with open(os.path.join(STATIC_DIR, "domiciliarios.html"), "r") as f:
         return HTMLResponse(f.read())
 
+@app.get("/api/domiciliarios/lista")
+async def lista_domiciliarios():
+    """Nombres de domiciliarios activos, para llenar el selector de login.
+    No expone PIN ni teléfono."""
+    return {"nombres": get_nombres_domiciliarios_activos()}
+
 @app.post("/api/domiciliario/login")
 async def login_domiciliario(request: Request):
     body = await request.json()
@@ -1045,9 +1098,11 @@ async def login_domiciliario(request: Request):
     dom = get_domiciliario_by_nombre(nombre)
     if not dom:
         return {"ok": False, "msg": "Domiciliario no encontrado"}
+    if not dom.get("activo", True):
+        return {"ok": False, "msg": "Cuenta desactivada"}
     if str(dom.get("pin", "")) != str(pin):
         return {"ok": False, "msg": "PIN incorrecto"}
-    return {"ok": True}
+    return {"ok": True, "dom_id": dom["id"], "nombre": dom["nombre"], "token": generar_token_dom(dom["id"])}
 
 @app.post("/api/domiciliario/cambiar-pin")
 async def cambiar_pin_domiciliario(request: Request):
@@ -1066,8 +1121,8 @@ async def cambiar_pin_domiciliario(request: Request):
     return {"ok": True}
 
 @app.get("/api/domiciliario/pedidos-pendientes")
-async def pedidos_pendientes(nombre: str = ""):
-    dom = get_domiciliario_by_nombre(nombre)
+async def pedidos_pendientes(dom_id: str = "", token: str = ""):
+    dom = verificar_sesion_dom(dom_id, token)
     if not dom or not dom.get("disponible"):
         return {"pedido": None, "stats": {}}
     # Buscar pedido pendiente no asignado
@@ -1089,11 +1144,11 @@ async def pedidos_pendientes(nombre: str = ""):
 @app.post("/api/domiciliario/aceptar")
 async def aceptar_pedido_dom(request: Request):
     body = await request.json()
-    nombre = body.get("nombre", "")
-    pedido_id = body.get("pedido_id", "")
-    dom = get_domiciliario_by_nombre(nombre)
+    dom = verificar_sesion_dom(body.get("dom_id"), body.get("token"))
     if not dom:
-        return {"ok": False, "msg": "Domiciliario no encontrado"}
+        return {"ok": False, "msg": "Sesión inválida, vuelve a iniciar sesión"}
+    nombre = dom["nombre"]
+    pedido_id = body.get("pedido_id", "")
     if pedido_ya_asignado(pedido_id):
         return {"ok": False, "msg": "Este pedido ya fue tomado por otro domiciliario"}
     try:
@@ -1126,8 +1181,11 @@ async def aceptar_pedido_dom(request: Request):
 @app.post("/api/domiciliario/entregado")
 async def marcar_entregado_dom(request: Request):
     body = await request.json()
+    dom = verificar_sesion_dom(body.get("dom_id"), body.get("token"))
+    if not dom:
+        return {"ok": False, "msg": "Sesión inválida, vuelve a iniciar sesión"}
+    nombre = dom["nombre"]
     pedido_id = body.get("pedido_id", "")
-    nombre = body.get("nombre", "")
     actualizar_estado_pedido(pedido_id, "entregado")
     pedido = get_pedido_by_id(pedido_id)
     if pedido:
@@ -1138,24 +1196,24 @@ async def marcar_entregado_dom(request: Request):
         enviar_whatsapp(ADMIN_NUMBER,
             f"✅ *Pedido #{pedido_id} entregado*\n🛵 Por: {nombre}")
     # Actualizar contador domiciliario
-    dom = get_domiciliario_by_nombre(nombre)
-    if dom:
-        supabase.table("domiciliarios").update({
-            "pedidos_completados": (dom.get("pedidos_completados") or 0) + 1
-        }).eq("id", dom["id"]).execute()
+    supabase.table("domiciliarios").update({
+        "pedidos_completados": (dom.get("pedidos_completados") or 0) + 1
+    }).eq("id", dom["id"]).execute()
     return {"ok": True}
 
 @app.post("/api/domiciliario/disponibilidad")
 async def cambiar_disponibilidad(request: Request):
     body = await request.json()
-    nombre = body.get("nombre", "")
+    dom = verificar_sesion_dom(body.get("dom_id"), body.get("token"))
+    if not dom:
+        return {"ok": False, "msg": "Sesión inválida, vuelve a iniciar sesión"}
     disponible = body.get("disponible", True)
-    supabase.table("domiciliarios").update({"disponible": disponible}).eq("nombre", nombre).execute()
+    supabase.table("domiciliarios").update({"disponible": disponible}).eq("id", dom["id"]).execute()
     return {"ok": True}
 
 @app.get("/api/domiciliario/mis-pedidos")
-async def mis_pedidos_dom(nombre: str = ""):
-    dom = get_domiciliario_by_nombre(nombre)
+async def mis_pedidos_dom(dom_id: str = "", token: str = ""):
+    dom = verificar_sesion_dom(dom_id, token)
     if not dom:
         return {"pedidos": [], "stats": {}}
     try:
@@ -1314,12 +1372,14 @@ async def recibir_mensaje(request: Request):
             clientes_eligiendo[numero] = True
             keys = list(_cache_restaurantes.keys())
             rest_key = None
-            if texto_lower == "1": rest_key = keys[0]
-            elif texto_lower == "2": rest_key = keys[1]
-            elif texto_lower == "3": rest_key = keys[2]
-            else:
+            if texto_lower.isdigit():
+                idx = int(texto_lower) - 1
+                if 0 <= idx < len(keys):
+                    rest_key = keys[idx]
+            if rest_key is None:
+                texto_normalizado = normalizar_texto(texto_lower)
                 for k, r in _cache_restaurantes.items():
-                    if r["nombre"].lower() in texto_lower or k.replace("_", " ") in texto_lower:
+                    if normalizar_texto(r["nombre"]) in texto_normalizado or k.replace("_", " ") in texto_lower:
                         rest_key = k
                         break
 
@@ -1356,10 +1416,18 @@ async def recibir_mensaje(request: Request):
 
         # ── YA ELIGIÓ RESTAURANTE ─────────────────────────────────────────────
         rest_key = cliente_restaurante[numero]
+        r_actual = get_restaurante(rest_key)
+
+        if r_actual is None:
+            # El restaurante ya no existe (fue eliminado o cambiado de ID) - evita el crash
+            cliente_restaurante.pop(numero, None)
+            historial.pop(numero, None)
+            clientes_eligiendo[numero] = True
+            enviar_whatsapp(numero, "😔 Ese restaurante ya no está disponible.\n\n" + lista_restaurantes())
+            return {"status": "ok"}
 
         if not esta_abierto(rest_key) and numero != ADMIN_NUMBER:
-            r = _cache_restaurantes[rest_key]
-            enviar_whatsapp(numero, f"😔 *{r['nombre']}* cerró. Horario: {r['hora_inicio']}:00–{r['hora_fin']}:00. ¡Hasta mañana! 🙏")
+            enviar_whatsapp(numero, f"😔 *{r_actual['nombre']}* cerró. Horario: {r_actual['hora_inicio']}:00–{r_actual['hora_fin']}:00. ¡Hasta mañana! 🙏")
             cliente_restaurante.pop(numero, None)
             return {"status": "ok"}
 
