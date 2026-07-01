@@ -34,7 +34,7 @@ body{font-family:'Segoe UI',sans-serif;background:var(--bg);color:var(--text);mi
 .section{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:20px}
 .section-header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border)}
 .section-header h3{font-size:1rem;font-weight:700}
-.section-body{padding:16px 20px}
+.section-body{padding:16px 20px;overflow-x:auto;-webkit-overflow-scrolling:touch}
 /* BUTTONS */
 .btn{padding:8px 16px;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.82rem;transition:.15s}
 .btn-primary{background:var(--accent);color:#1a1a1a}.btn-primary:hover{background:var(--accent2)}
@@ -107,7 +107,10 @@ tr:hover td{background:var(--surface2)}
   }
   .nav-item.active{border-left-color:transparent;border-bottom-color:var(--accent)}
   .sidebar>div:last-child{margin-top:0!important;margin-left:auto;white-space:nowrap}
-  .main{margin-left:0}
+  .main{margin-left:0;padding:16px}
+  .section{overflow-x:auto}
+  table{width:auto;min-width:560px}
+  td,th{white-space:nowrap}
 }
 </style>
 </head>
