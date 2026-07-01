@@ -458,6 +458,21 @@ def enviar_whatsapp(numero, mensaje):
     print("META →", r.status_code, r.text)
     return r
 
+def enviar_whatsapp_documento(numero, link, filename, caption):
+    """Manda un archivo (ej. el PDF del menú de un restaurante) como documento
+    adjunto de WhatsApp, en vez de solo un link de texto."""
+    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
+    data = {
+        "messaging_product": "whatsapp",
+        "to": numero,
+        "type": "document",
+        "document": {"link": link, "filename": filename, "caption": caption},
+    }
+    r = requests.post(url, headers=headers, json=data)
+    print("META (documento) →", r.status_code, r.text)
+    return r
+
 def enviar_menu_texto(numero, rest_key):
     r = get_restaurante(rest_key)
     extra = _estado_extra.get(rest_key, {})
@@ -1728,7 +1743,15 @@ async def recibir_mensaje(request: Request):
                 return {"status": "ok"}
 
             if any(p in texto_lower for p in ["el menú", "el menu", "menú", "menu", "carta", "pdf"]):
-                enviar_menu_texto(numero, rest_key)
+                r_menu = get_restaurante(rest_key)
+                modo = r_menu.get("menu_modo") if r_menu else None
+                url_menu = r_menu.get("menu_url") if r_menu else None
+                if modo == "pdf" and url_menu:
+                    enviar_whatsapp_documento(numero, url_menu, f"Menu-{r_menu['nombre']}.pdf", f"📋 Menú de {r_menu['nombre']}")
+                elif modo == "link" and url_menu:
+                    enviar_whatsapp(numero, f"📋 Puedes ver el menú completo de *{r_menu['nombre']}* aquí:\n{url_menu}")
+                else:
+                    enviar_menu_texto(numero, rest_key)
                 enviar_whatsapp(numero, "¿Qué te gustaría pedir? 😊")
                 return {"status": "ok"}
 
@@ -1885,6 +1908,8 @@ async def admin_crear_restaurante(request: Request):
             "domicilio_activo": True,
             "activo": True,
             "panel_password": body.get("panel_password", ""),
+            "menu_modo": body.get("menu_modo", "texto"),
+            "menu_url": body.get("menu_url", ""),
         }
         supabase.table("restaurantes").insert(r).execute()
         cargar_restaurantes()
