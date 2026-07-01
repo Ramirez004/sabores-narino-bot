@@ -134,7 +134,23 @@ async function cerrarSesion(){
   window.location.href='/panel-restaurante';
 }
 
+function sonarAlerta(){
+  try{
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    [0, 0.35].forEach(delay=>{
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.frequency.value = 880;
+      g.gain.setValueAtTime(0.3, ctx.currentTime + delay);
+      o.start(ctx.currentTime + delay);
+      o.stop(ctx.currentTime + delay + 0.25);
+    });
+  }catch(e){}
+}
+
 let todos=[], tabActual="todos", estadoActual={};
+let idsActivosConocidos = null; // null = primera carga, no alertar todavía
 
 async function cargarTodo(){
   try{
@@ -143,6 +159,14 @@ async function cargarTodo(){
     const d=await r.json();
     todos=d.pedidos||[];
     estadoActual=d.estado||{};
+
+    const idsActuales = new Set(todos.filter(p=>p.estado==='activo').map(p=>p.id));
+    if(idsActivosConocidos){
+      const nuevos=[...idsActuales].filter(id=>!idsActivosConocidos.has(id));
+      if(nuevos.length){ sonarAlerta(); toast('🔔 ¡Pedido nuevo!'); }
+    }
+    idsActivosConocidos = idsActuales;
+
     render();stats();contadores();ventasHoy();renderEstado();
   }catch(e){console.error(e);}
 }

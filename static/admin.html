@@ -346,6 +346,7 @@ function abrirModalRestaurante(r) {
     <div class="form-group"><label>Hora apertura (0-23)</label><input id="f-hi" type="number" min="0" max="23" value="${r?.hora_inicio??12}"></div>
     <div class="form-group"><label>Hora cierre (0-23)</label><input id="f-hf" type="number" min="0" max="23" value="${r?.hora_fin??23}"></div>
     <div class="form-group"><label>Contraseña del panel del restaurante (opcional)</label><input id="f-pw-panel" value="${r?.panel_password||""}" placeholder="Deja vacío para no darle panel propio"></div>
+    <div class="form-group"><label>WhatsApp del restaurante para avisos de pedido (opcional)</label><input id="f-whatsapp-notif" value="${r?.whatsapp_notificacion||""}" placeholder="573145274437 (con código país, sin +)"></div>
     ${(esEditar && r?.panel_password) ? `
     <div class="form-group">
       <label>Link del panel de este restaurante</label>
@@ -379,6 +380,7 @@ async function guardarRestaurante(esEditar, id) {
     hora_inicio: parseInt(document.getElementById("f-hi").value),
     hora_fin: parseInt(document.getElementById("f-hf").value),
     panel_password: document.getElementById("f-pw-panel").value.trim(),
+    whatsapp_notificacion: document.getElementById("f-whatsapp-notif").value.trim(),
     menu_modo: document.getElementById("f-menu-modo").value,
     menu_url: document.getElementById("f-menu-url").value.trim(),
   };
