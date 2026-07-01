@@ -68,6 +68,7 @@
 
 <script>
 const API = "";
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 let domiciliario = localStorage.getItem("dom_nombre") || "";
 let domId = localStorage.getItem("dom_id") || "";
 let domToken = localStorage.getItem("dom_token") || "";
@@ -99,7 +100,7 @@ async function renderLogin() {
     const nombres = d.nombres || [];
     const sel = document.getElementById("sel-nombre");
     sel.innerHTML = '<option value="">Selecciona tu nombre</option>' +
-      nombres.map(n => `<option value="${n}">${n}</option>`).join("");
+      nombres.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
   } catch (e) {
     toast("No se pudo cargar la lista de domiciliarios");
   }
@@ -264,8 +265,8 @@ function render() {
     pedidoHtml = `
       <div class="pedido-disponible">
         <div class="badge">🔔 Pedido disponible</div>
-        <h2>🍽️ ${pedidoActual.restaurante_nombre || ""}</h2>
-        <div class="info-row"><b>📍</b><span>${pedidoActual.direccion || ""}</span></div>
+        <h2>🍽️ ${esc(pedidoActual.restaurante_nombre || "")}</h2>
+        <div class="info-row"><b>📍</b><span>${esc(pedidoActual.direccion || "")}</span></div>
         <div class="info-row"><b>💰</b><span>Domicilio: $5.000</span></div>
         <button class="btn-aceptar" onclick="aceptarPedido('${pedidoActual.id}')">✅ Aceptar pedido</button>
       </div>
@@ -283,9 +284,9 @@ function render() {
         <h3>📦 Tus entregas activas</h3>
         ${misPedidos.map(p => `
           <div class="pedido-activo-card">
-            <div class="id">#${p.id} — ${p.restaurante_nombre || ""}</div>
-            <div class="dir">📍 ${p.direccion || ""}</div>
-            <div class="resumen">${p.resumen || ""}</div>
+            <div class="id">#${esc(p.id)} — ${esc(p.restaurante_nombre || "")}</div>
+            <div class="dir">📍 ${esc(p.direccion || "")}</div>
+            <div class="resumen">${esc(p.resumen || "")}</div>
             <button class="btn-entregado" onclick="marcarEntregado('${p.id}')">✅ Marcar como entregado</button>
           </div>
         `).join("")}
@@ -295,7 +296,7 @@ function render() {
 
   document.getElementById("app").innerHTML = `
     <header>
-      <div class="saludo">👋 ${domiciliario}<span>${stats.pedidos_hoy || 0} entregas hoy</span></div>
+      <div class="saludo">👋 ${esc(domiciliario)}<span>${stats.pedidos_hoy || 0} entregas hoy</span></div>
       <div class="toggle-wrap">
         <span class="toggle-label">${disponible ? "Disponible" : "Desconectado"}</span>
         <div class="toggle ${disponible ? "on" : ""}" onclick="toggleDisponible()"><div class="knob"></div></div>

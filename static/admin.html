@@ -198,6 +198,7 @@ tr:hover td{background:var(--surface2)}
 const PW = "{{ADMIN_PW}}";
 let tabActual = "dashboard";
 let restaurantes = [];
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
 function toast(msg, tipo="") {
   const t = document.getElementById("toast");
@@ -247,9 +248,9 @@ async function cargarStats() {
   const max = Math.max(...Object.values(por), 1);
   chart.innerHTML = Object.entries(por).map(([nombre, cant]) => `
     <div class="bar-wrap">
-      <div class="bar-val">${cant}</div>
+      <div class="bar-val">${esc(cant)}</div>
       <div class="bar" style="height:${Math.max((cant/max)*100,4)}px"></div>
-      <div class="bar-lbl">${nombre.split(" ")[0]}</div>
+      <div class="bar-lbl">${esc(nombre.split(" ")[0])}</div>
     </div>
   `).join("") || "<p style='color:var(--text2);font-size:.85rem'>Sin datos aún</p>";
 }
@@ -263,21 +264,21 @@ async function cargarRestaurantes() {
   const sel = document.getElementById("sel-rest-menu");
   if (sel) {
     const val = sel.value;
-    sel.innerHTML = '<option value="">Selecciona...</option>' + restaurantes.map(r => `<option value="${r.id}" ${r.id===val?"selected":""}>${r.nombre}</option>`).join("");
+    sel.innerHTML = '<option value="">Selecciona...</option>' + restaurantes.map(r => `<option value="${r.id}" ${r.id===val?"selected":""}>${esc(r.nombre)}</option>`).join("");
   }
   const tbody = document.getElementById("tabla-restaurantes");
   if (!tbody) return;
   if (!restaurantes.length) { tbody.innerHTML = '<tr class="empty-row"><td colspan="5">No hay restaurantes</td></tr>'; return; }
   tbody.innerHTML = restaurantes.map(r => `
     <tr>
-      <td><strong>${r.nombre}</strong></td>
-      <td style="color:var(--text2);font-size:.8rem">${r.direccion||"—"}</td>
-      <td style="font-size:.8rem">${r.hora_inicio}:00 – ${r.hora_fin}:00</td>
+      <td><strong>${esc(r.nombre)}</strong></td>
+      <td style="color:var(--text2);font-size:.8rem">${esc(r.direccion||"—")}</td>
+      <td style="font-size:.8rem">${esc(r.hora_inicio)}:00 – ${esc(r.hora_fin)}:00</td>
       <td><span class="badge ${r.activo?"badge-green":"badge-red"}">${r.activo?"Activo":"Bloqueado"}</span></td>
       <td style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-ghost btn-sm" onclick="abrirModalRestaurante(${JSON.stringify(r).replace(/"/g,"&quot;")})">✏️ Editar</button>
         <button class="btn btn-${r.activo?"danger":"success"} btn-sm" onclick="toggleRestaurante('${r.id}',${!r.activo})">${r.activo?"🚫 Bloquear":"✅ Activar"}</button>
-        <button class="btn btn-danger btn-sm" onclick="eliminarRestaurante('${r.id}','${r.nombre}')">🗑️</button>
+        <button class="btn btn-danger btn-sm" onclick="eliminarRestaurante('${r.id}','${esc(r.nombre)}')">🗑️</button>
       </td>
     </tr>
   `).join("");
@@ -343,8 +344,8 @@ async function cargarMenu() {
   if (!d.data.length) { tbody.innerHTML='<tr class="empty-row"><td colspan="4">Sin ítems en el menú</td></tr>'; return; }
   tbody.innerHTML = d.data.map(item => `
     <tr>
-      <td><span class="badge badge-yellow">${item.categoria}</span></td>
-      <td style="font-size:.8rem;max-width:300px;color:var(--text2)">${item.descripcion.substring(0,80)}${item.descripcion.length>80?"...":""}</td>
+      <td><span class="badge badge-yellow">${esc(item.categoria)}</span></td>
+      <td style="font-size:.8rem;max-width:300px;color:var(--text2)">${esc(item.descripcion.substring(0,80))}${item.descripcion.length>80?"...":""}</td>
       <td>
         <div class="toggle-sm ${item.activo?"on":""}" onclick="toggleItem(${item.id},${!item.activo})"><div class="knob"></div></div>
       </td>
@@ -362,7 +363,7 @@ function abrirModalItem(item) {
   document.getElementById("modal-content").innerHTML = `
     <h3>${esEditar?"✏️ Editar":"➕ Nuevo"} ítem del menú</h3>
     ${!esEditar?`<div class="form-group"><label>Restaurante</label><select id="f-rest" style="width:100%;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text)">
-      ${restaurantes.map(r=>`<option value="${r.id}" ${r.id===rest_id?"selected":""}>${r.nombre}</option>`).join("")}
+      ${restaurantes.map(r=>`<option value="${r.id}" ${r.id===rest_id?"selected":""}>${esc(r.nombre)}</option>`).join("")}
     </select></div>`:""}
     <div class="form-group"><label>Categoría (ej: hamburguesas, bebidas)</label><input id="f-cat" value="${item?.categoria||""}" placeholder="hamburguesas"></div>
     <div class="form-group"><label>Descripción completa con precios</label><textarea id="f-desc" placeholder="Hamburguesas: Sencilla $15.000 / Doble $22.000">${item?.descripcion||""}</textarea></div>
@@ -412,14 +413,14 @@ async function cargarDomiciliarios() {
   if (!d.data.length) { tbody.innerHTML='<tr class="empty-row"><td colspan="6">No hay domiciliarios</td></tr>'; return; }
   tbody.innerHTML = d.data.map(dom => `
     <tr>
-      <td><strong>${dom.nombre}</strong></td>
-      <td style="color:var(--text2);font-size:.8rem">${dom.telefono}</td>
-      <td><span class="badge badge-yellow">${dom.pin||"—"}</span></td>
+      <td><strong>${esc(dom.nombre)}</strong></td>
+      <td style="color:var(--text2);font-size:.8rem">${esc(dom.telefono)}</td>
+      <td><span class="badge badge-yellow">${esc(dom.pin||"—")}</span></td>
       <td><span class="badge ${dom.disponible?"badge-green":"badge-red"}">${dom.disponible?"En turno":"Fuera"}</span></td>
       <td><div class="toggle-sm ${dom.activo?"on":""}" onclick="toggleDom(${dom.id},${!dom.activo})"><div class="knob"></div></div></td>
       <td style="display:flex;gap:6px">
         <button class="btn btn-ghost btn-sm" onclick="abrirModalDom(${JSON.stringify(dom).replace(/"/g,"&quot;")})">✏️</button>
-        <button class="btn btn-danger btn-sm" onclick="eliminarDom(${dom.id},'${dom.nombre}')">🗑️</button>
+        <button class="btn btn-danger btn-sm" onclick="eliminarDom(${dom.id},'${esc(dom.nombre)}')">🗑️</button>
       </td>
     </tr>
   `).join("");
@@ -479,9 +480,9 @@ async function cargarClientes() {
   if (!d.data.length) { tbody.innerHTML='<tr class="empty-row"><td colspan="4">No hay clientes registrados</td></tr>'; return; }
   tbody.innerHTML = d.data.map(c => `
     <tr>
-      <td><strong>${c.nombre||"Sin nombre"}</strong></td>
-      <td style="color:var(--text2);font-size:.8rem">+${c.numero}</td>
-      <td style="font-size:.8rem;color:var(--text2)">${c.direccion||"—"}</td>
+      <td><strong>${esc(c.nombre||"Sin nombre")}</strong></td>
+      <td style="color:var(--text2);font-size:.8rem">+${esc(c.numero)}</td>
+      <td style="font-size:.8rem;color:var(--text2)">${esc(c.direccion||"—")}</td>
       <td style="font-size:.75rem;color:var(--text2)">${c.fecha_registro?new Date(c.fecha_registro).toLocaleDateString("es-CO"):""}</td>
     </tr>
   `).join("");
