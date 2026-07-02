@@ -749,6 +749,14 @@ def pedido_ya_asignado(pedido_id):
     except Exception:
         return False
 
+def pedido_asignado_a(pedido_id, dom_id):
+    """Verifica que este pedido esté realmente asignado a este domiciliario específico."""
+    try:
+        res = supabase.table("asignaciones").select("*").eq("pedido_id", pedido_id).eq("domiciliario_id", dom_id).execute()
+        return len(res.data) > 0
+    except Exception:
+        return False
+
 # Pedidos pendientes de asignacion (en memoria, se limpia al asignar)
 _pedidos_pendientes = {}  # pedido_id -> pedido dict
 
@@ -1547,8 +1555,10 @@ async def cambiar_pin_domiciliario(request: Request):
 @app.get("/api/domiciliario/pedidos-pendientes")
 async def pedidos_pendientes(dom_id: str = "", token: str = ""):
     dom = verificar_sesion_dom(dom_id, token)
-    if not dom or not dom.get("disponible"):
-        return {"pedido": None, "stats": {}}
+    if not dom:
+        return {"pedido": None, "stats": {}, "disponible": False}
+    if not dom.get("disponible"):
+        return {"pedido": None, "stats": {}, "disponible": False}
     # Buscar pedido pendiente no asignado
     pedido_para_dom = None
     for pid, pedido in list(_pedidos_pendientes.items()):
@@ -1563,7 +1573,7 @@ async def pedidos_pendientes(dom_id: str = "", token: str = ""):
         pedidos_hoy = len(res.data or [])
     except Exception:
         pedidos_hoy = 0
-    return {"pedido": pedido_para_dom, "stats": {"pedidos_hoy": pedidos_hoy}}
+    return {"pedido": pedido_para_dom, "stats": {"pedidos_hoy": pedidos_hoy}, "disponible": True}
 
 @app.post("/api/domiciliario/aceptar")
 async def aceptar_pedido_dom(request: Request):
@@ -1573,6 +1583,15 @@ async def aceptar_pedido_dom(request: Request):
         return {"ok": False, "msg": "Sesión inválida, vuelve a iniciar sesión"}
     nombre = dom["nombre"]
     pedido_id = body.get("pedido_id", "")
+    pedido_check = get_pedido_by_id(pedido_id)
+    if not pedido_check:
+        _pedidos_pendientes.pop(pedido_id, None)
+        return {"ok": False, "msg": "Este pedido ya no existe"}
+    if pedido_check.get("tipo") != "domicilio":
+        return {"ok": False, "msg": "Este pedido no es de domicilio"}
+    if pedido_check.get("estado") not in ["activo", "preparando"]:
+        _pedidos_pendientes.pop(pedido_id, None)
+        return {"ok": False, "msg": f"Este pedido ya no está disponible (estado: {pedido_check.get('estado')})"}
     if pedido_ya_asignado(pedido_id):
         return {"ok": False, "msg": "Este pedido ya fue tomado por otro domiciliario"}
     try:
@@ -1616,6 +1635,8 @@ async def marcar_entregado_dom(request: Request):
         return {"ok": False, "msg": "Sesión inválida, vuelve a iniciar sesión"}
     nombre = dom["nombre"]
     pedido_id = body.get("pedido_id", "")
+    if not pedido_asignado_a(pedido_id, dom["id"]):
+        return {"ok": False, "msg": "Este pedido no está asignado a ti"}
     actualizar_estado_pedido(pedido_id, "entregado")
     pedido = get_pedido_by_id(pedido_id)
     if pedido:
