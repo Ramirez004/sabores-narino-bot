@@ -1,7 +1,8 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, UploadFile, File
 from fastapi.responses import PlainTextResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import anthropic, requests, os, traceback, uuid, re, unicodedata, hmac, hashlib, time
+from urllib.parse import quote
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, date
 import pytz
@@ -15,10 +16,13 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/assets", StaticFiles(directory=os.path.join(STATIC_DIR, "assets")), name="assets")
+app.mount("/images", StaticFiles(directory=os.path.join(STATIC_DIR, "images")), name="images")
 
 CLAUDE_KEY      = os.getenv("CLAUDE_KEY")
 WHATSAPP_TOKEN  = os.getenv("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
+WHATSAPP_MAIN_NUMBER = os.getenv("WHATSAPP_MAIN_NUMBER", "573107349485")  # número que se muestra en el botón "Pide Aquí"
+STORAGE_BUCKET_FOTOS = "restaurantes-fotos"
 VERIFY_TOKEN    = os.getenv("VERIFY_TOKEN")
 # App Secret de tu app de Meta (Meta for Developers → tu app → Configuración básica →
 # "Clave secreta de la app"). Se usa para verificar que los mensajes del webhook
@@ -2252,6 +2256,9 @@ async def admin_crear_restaurante(request: Request):
             "menu_modo": body.get("menu_modo", "texto"),
             "menu_url": body.get("menu_url", ""),
             "whatsapp_notificacion": body.get("whatsapp_notificacion", ""),
+            "categoria": body.get("categoria", ""),
+            "descripcion": body.get("descripcion", ""),
+            "logo_url": body.get("logo_url", ""),
         }
         supabase.table("restaurantes").insert(r).execute()
         cargar_restaurantes()
@@ -2290,6 +2297,51 @@ async def admin_eliminar_restaurante(rest_id: str, request: Request):
         error_txt = str(e).lower()
         if "foreign key" in error_txt or "still referenced" in error_txt:
             return {"ok": False, "msg": "No se puede eliminar: este restaurante ya tiene pedidos guardados en su historial. Usa 'Bloquear' en vez de 'Eliminar' para desactivarlo sin perder ese historial."}
+        return {"ok": False, "msg": str(e)}
+
+@app.post("/api/admin/restaurantes/{rest_id}/foto")
+async def admin_subir_foto_restaurante(rest_id: str, request: Request, foto: UploadFile = File(...)):
+    check_admin(request)
+    try:
+        contenido = await foto.read()
+        ext = os.path.splitext(foto.filename or "")[1].lower() or ".jpg"
+        ruta_storage = f"{rest_id}{ext}"
+        supabase.storage.from_(STORAGE_BUCKET_FOTOS).upload(
+            ruta_storage,
+            contenido,
+            {"content-type": foto.content_type or "image/jpeg", "upsert": "true"},
+        )
+        url_publica = supabase.storage.from_(STORAGE_BUCKET_FOTOS).get_public_url(ruta_storage)
+        supabase.table("restaurantes").update({"logo_url": url_publica}).eq("id", rest_id).execute()
+        cargar_restaurantes()
+        return {"ok": True, "logo_url": url_publica}
+    except Exception as e:
+        traceback.print_exc()
+        return {"ok": False, "msg": str(e)}
+
+# ── API PÚBLICA: RESTAURANTES PARA LA LANDING ────────────────────────────────
+
+@app.get("/api/restaurantes-publicos")
+async def restaurantes_publicos():
+    try:
+        res = supabase.table("restaurantes").select(
+            "id,nombre,categoria,descripcion,logo_url"
+        ).eq("activo", True).order("nombre").execute()
+        data = []
+        for r in (res.data or []):
+            nombre = r.get("nombre", "")
+            mensaje = quote(f"Hola, quiero pedir de {nombre}")
+            data.append({
+                "id": r["id"],
+                "nombre": nombre,
+                "categoria": r.get("categoria") or "",
+                "descripcion": r.get("descripcion") or "",
+                "logo_url": r.get("logo_url") or "",
+                "whatsapp": f"https://wa.me/{WHATSAPP_MAIN_NUMBER}?text={mensaje}",
+            })
+        return {"ok": True, "data": data}
+    except Exception as e:
+        traceback.print_exc()
         return {"ok": False, "msg": str(e)}
 
 # ── APIs ADMIN: MENÚ ──────────────────────────────────────────────────────────
