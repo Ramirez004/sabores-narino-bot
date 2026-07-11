@@ -198,9 +198,25 @@ async function guardarNuevoPin() {
 }
 
 let disponible = false; // se sincroniza con el servidor en el primer cargarDatos(), este es solo el valor inicial mientras carga
-let pedidoActual = null;
+let pedidosDisponibles = [];
 let misPedidos = [];
 let stats = { pedidos_hoy: 0 };
+let idsDisponiblesConocidos = null; // null = primera carga, no alertar todavía
+
+function sonarAlerta() {
+  try {
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    [0, 0.35].forEach(delay => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.frequency.value = 880;
+      g.gain.setValueAtTime(0.3, ctx.currentTime + delay);
+      o.start(ctx.currentTime + delay);
+      o.stop(ctx.currentTime + delay + 0.25);
+    });
+  } catch(e) {}
+}
 
 async function cargarDatos() {
   try {
@@ -211,9 +227,17 @@ async function cargarDatos() {
     const dPend = await rPend.json();
     const dMios = await rMios.json();
     disponible = !!dPend.disponible; // siempre refleja el valor real guardado en el servidor
-    pedidoActual = dPend.pedido;
+    pedidosDisponibles = dPend.pedidos || (dPend.pedido ? [dPend.pedido] : []);
     stats = dPend.stats || stats;
     misPedidos = dMios.pedidos || [];
+
+    const idsActuales = new Set(pedidosDisponibles.map(p => p.id));
+    if (idsDisponiblesConocidos && disponible) {
+      const nuevos = [...idsActuales].filter(id => !idsDisponiblesConocidos.has(id));
+      if (nuevos.length) { sonarAlerta(); toast("🔔 ¡Pedido nuevo disponible!"); }
+    }
+    idsDisponiblesConocidos = idsActuales;
+
     render();
   } catch (e) { console.error(e); }
 }
@@ -272,16 +296,16 @@ function renderApp() {
 
 function render() {
   let pedidoHtml = "";
-  if (disponible && pedidoActual) {
-    pedidoHtml = `
+  if (disponible && pedidosDisponibles.length > 0) {
+    pedidoHtml = pedidosDisponibles.map(p => `
       <div class="pedido-disponible">
         <div class="badge">🔔 Pedido disponible</div>
-        <h2>🍽️ ${esc(pedidoActual.restaurante_nombre || "")}</h2>
-        <div class="info-row"><b>📍</b><span>${esc(pedidoActual.direccion || "")}</span></div>
+        <h2>🍽️ ${esc(p.restaurante_nombre || "")}</h2>
+        <div class="info-row"><b>📍</b><span>${esc(p.direccion || "")}</span></div>
         <div class="info-row"><b>💰</b><span>Domicilio: $5.000</span></div>
-        <button class="btn-aceptar" onclick="aceptarPedido('${pedidoActual.id}')">✅ Aceptar pedido</button>
+        <button class="btn-aceptar" onclick="aceptarPedido('${p.id}')">✅ Aceptar pedido</button>
       </div>
-    `;
+    `).join("");
   } else if (!disponible) {
     pedidoHtml = `<div class="empty-msg"><div class="icon">😴</div>Estás desconectado.<br>Actívate para recibir pedidos.</div>`;
   } else {
