@@ -301,6 +301,7 @@ function render() {
       <div class="pedido-disponible">
         <div class="badge">🔔 Pedido disponible</div>
         <h2>🍽️ ${esc(p.restaurante_nombre || "")}</h2>
+        <div class="info-row"><b>👤</b><span>${esc(p.cliente_nombre || "Sin nombre")}</span></div>
         <div class="info-row"><b>📍</b><span>${esc(p.direccion || "")}</span></div>
         <div class="info-row"><b>💰</b><span>Domicilio: $5.000</span></div>
         <button class="btn-aceptar" onclick="aceptarPedido('${p.id}')">✅ Aceptar pedido</button>
@@ -320,6 +321,7 @@ function render() {
         ${misPedidos.map(p => `
           <div class="pedido-activo-card">
             <div class="id">#${esc(p.id)} — ${esc(p.restaurante_nombre || "")}</div>
+            <div class="dir">👤 ${esc(p.cliente_nombre || "Sin nombre")}</div>
             <div class="dir">📍 ${esc(p.direccion || "")}</div>
             <div class="resumen">${esc(p.resumen || "")}</div>
             <button class="btn-entregado" onclick="marcarEntregado('${p.id}')">✅ Marcar como entregado</button>
