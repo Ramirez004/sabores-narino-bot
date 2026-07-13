@@ -94,6 +94,11 @@ Error generating stack: `+l.message+`
       .cd-cat-nombre{font-family:'Poppins',sans-serif;font-weight:700;font-size:.78rem;text-transform:uppercase;letter-spacing:.5px;color:oklch(55% .22 29);margin-bottom:4px}
       .cd-cat-desc{font-size:.88rem;line-height:1.5;white-space:pre-wrap;opacity:.9}
       .cd-cat-agotados{font-size:.76rem;color:#c0392b;margin-top:4px;font-style:italic}
+      .cd-pdf-wrap{margin-bottom:16px}
+      .cd-pdf-frame{width:100%;height:60vh;min-height:320px;border:1px solid rgba(0,0,0,.12);border-radius:12px;display:block}
+      @media(prefers-color-scheme:dark){.cd-pdf-frame{border-color:rgba(255,255,255,.15)}}
+      .cd-pdf-link{display:block;text-align:center;margin-top:8px;font-size:.82rem;color:oklch(55% .22 29);text-decoration:none;font-weight:600}
+      .cd-pdf-link:hover{text-decoration:underline}
       .cd-textarea-label{display:block;font-size:.82rem;font-weight:600;margin:18px 0 8px}
       .cd-textarea{width:100%;padding:12px;border-radius:10px;border:1px solid rgba(0,0,0,.15);background:rgba(0,0,0,.02);color:inherit;font-family:inherit;font-size:.9rem;min-height:80px;resize:vertical;box-sizing:border-box}
       @media(prefers-color-scheme:dark){.cd-textarea{border-color:rgba(255,255,255,.15);background:rgba(255,255,255,.05)}}
@@ -139,6 +144,10 @@ Error generating stack: `+l.message+`
           });
         }
 
+        function formatearCategoria(c){
+          return String(c || '').replace(/_/g, ' ').replace(/\b\w/g, function(m){ return m.toUpperCase(); });
+        }
+
         function abrirModalMenu(restaurante, hrefOriginal){
           var overlay = document.getElementById('cd-menu-overlay');
           var modal = document.getElementById('cd-modal');
@@ -149,23 +158,34 @@ Error generating stack: `+l.message+`
             .then(function(r){ return r.json(); })
             .then(function(d){
               if(!d.ok){ throw new Error(d.msg || 'error'); }
-              var catsHtml = (d.data || []).map(function(c){
-                var agotados = (c.agotados_hoy && c.agotados_hoy.length)
-                  ? '<div class="cd-cat-agotados">No disponible hoy: ' + escHtml(c.agotados_hoy.join(', ')) + '</div>'
-                  : '';
-                return '<div class="cd-cat">' +
-                  '<div class="cd-cat-nombre">' + escHtml(c.categoria) + '</div>' +
-                  '<div class="cd-cat-desc">' + escHtml(c.descripcion) + '</div>' +
-                  agotados +
+              var menuHtml;
+              if(d.menu_modo === 'pdf' && d.menu_url){
+                menuHtml =
+                  '<div class="cd-pdf-wrap">' +
+                    '<iframe src="' + escHtml(d.menu_url) + '" class="cd-pdf-frame"></iframe>' +
+                    '<a href="' + escHtml(d.menu_url) + '" target="_blank" rel="noopener" class="cd-pdf-link">Abrir el PDF en una pestaña nueva</a>' +
                   '</div>';
-              }).join('');
-              if(!catsHtml) catsHtml = '<p style="opacity:.7;font-size:.88rem">Este restaurante aún no tiene su menú cargado. Escríbeles directo por WhatsApp.</p>';
+              } else if(d.menu_modo === 'link' && d.menu_url){
+                menuHtml = '<a href="' + escHtml(d.menu_url) + '" target="_blank" rel="noopener" class="cd-btn-wa" style="display:block;text-align:center;text-decoration:none;box-sizing:border-box;margin-bottom:16px">Ver menú completo</a>';
+              } else {
+                menuHtml = (d.data || []).map(function(c){
+                  var agotados = (c.agotados_hoy && c.agotados_hoy.length)
+                    ? '<div class="cd-cat-agotados">No disponible hoy: ' + escHtml(c.agotados_hoy.join(', ')) + '</div>'
+                    : '';
+                  return '<div class="cd-cat">' +
+                    '<div class="cd-cat-nombre">' + escHtml(formatearCategoria(c.categoria)) + '</div>' +
+                    '<div class="cd-cat-desc">' + escHtml(c.descripcion) + '</div>' +
+                    agotados +
+                    '</div>';
+                }).join('');
+                if(!menuHtml) menuHtml = '<p style="opacity:.7;font-size:.88rem">Este restaurante aún no tiene su menú cargado. Escríbeles directo por WhatsApp.</p>';
+              }
 
               modal.innerHTML =
                 '<button class="cd-modal-close" id="cd-modal-close">×</button>' +
                 '<div class="cd-modal-head"><h2>' + escHtml(d.nombre) + '</h2><p>Domicilio: $' + Number(d.costo_domicilio || 0).toLocaleString('es-CO') + '</p></div>' +
                 '<div class="cd-modal-body">' +
-                  catsHtml +
+                  menuHtml +
                   '<label class="cd-textarea-label" for="cd-pedido-texto">Escribe aquí lo que quieres pedir</label>' +
                   '<textarea class="cd-textarea" id="cd-pedido-texto" placeholder="Ej: 2 hamburguesas dobles y 1 jugo de lulo"></textarea>' +
                   '<button class="cd-btn-wa" id="cd-btn-enviar">Pedir por WhatsApp</button>' +
