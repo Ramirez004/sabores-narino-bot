@@ -740,12 +740,25 @@ def build_system_prompt(rest_key, cliente=None, descuento=None):
 
     descuento_txt = ""
     if descuento:
-        descuento_txt = f"\nDESCUENTO ACTIVO: {descripcion_descuento(descuento)} (código {descuento['codigo']})."
-        instr_descuento = (
-            "\n- El cliente ya tiene un código de descuento validado (ver DESCUENTO ACTIVO arriba). Aplícalo al "
-            "total del pedido antes de mostrar el resumen final, y muestra en el resumen tanto el subtotal como "
-            "el descuento y el total ya con el descuento aplicado."
-        )
+        monto_min = descuento.get("monto_minimo") or 0
+        monto_min_txt = f"{monto_min:,.0f}".replace(",", ".")
+        condicion_txt = f" — SOLO aplica si el subtotal es de al menos ${monto_min_txt}" if monto_min > 0 else ""
+        descuento_txt = f"\nDESCUENTO ACTIVO: {descripcion_descuento(descuento)} (código {descuento['codigo']}){condicion_txt}."
+        if monto_min > 0:
+            instr_descuento = (
+                f"\n- El cliente ya tiene un código de descuento validado (ver DESCUENTO ACTIVO arriba), pero SOLO aplica si "
+                f"el subtotal del pedido (antes del descuento) es de al menos ${monto_min_txt}. Si el pedido no llega a ese "
+                f"monto, avísale amablemente que le falta para poder usar el código, NO apliques el descuento, y deja que "
+                f"continúe su pedido normal sin el descuento si así lo prefiere. Si sí llega al mínimo, deduce el descuento "
+                f"del total antes de mostrar el resumen final, y muestra en el resumen tanto el subtotal como el descuento "
+                f"y el total ya con el descuento aplicado."
+            )
+        else:
+            instr_descuento = (
+                "\n- El cliente ya tiene un código de descuento validado (ver DESCUENTO ACTIVO arriba). Aplícalo al "
+                "total del pedido antes de mostrar el resumen final, y muestra en el resumen tanto el subtotal como "
+                "el descuento y el total ya con el descuento aplicado."
+            )
     else:
         instr_descuento = (
             "\n- Antes de mostrar el resumen final, pregúntale al cliente si tiene algún código de descuento o "
@@ -2207,6 +2220,7 @@ async def api_restaurante_panel_crear_codigo(request: Request):
             "usos_totales": usos,
             "usos_restantes": usos,
             "activo": True,
+            "monto_minimo": float(body.get("monto_minimo") or 0),
             "fecha_expiracion": body.get("fecha_expiracion") or None,
         }
         supabase.table("codigos_descuento").insert(fila).execute()
@@ -2231,6 +2245,7 @@ async def api_restaurante_panel_editar_codigo(codigo_id: int, request: Request):
         if "valor" in datos: datos["valor"] = float(datos["valor"])
         if "usos_totales" in datos: datos["usos_totales"] = int(datos["usos_totales"])
         if "usos_restantes" in datos: datos["usos_restantes"] = int(datos["usos_restantes"])
+        if "monto_minimo" in datos: datos["monto_minimo"] = float(datos["monto_minimo"])
         supabase.table("codigos_descuento").update(datos).eq("id", codigo_id).execute()
         return {"ok": True}
     except Exception as e:
@@ -3304,6 +3319,7 @@ async def admin_crear_codigo(request: Request):
             "usos_totales": usos,
             "usos_restantes": usos,
             "activo": True,
+            "monto_minimo": float(body.get("monto_minimo") or 0),
             "fecha_expiracion": body.get("fecha_expiracion") or None,
         }
         supabase.table("codigos_descuento").insert(fila).execute()
@@ -3323,6 +3339,7 @@ async def admin_editar_codigo(codigo_id: int, request: Request):
         if "valor" in datos: datos["valor"] = float(datos["valor"])
         if "usos_totales" in datos: datos["usos_totales"] = int(datos["usos_totales"])
         if "usos_restantes" in datos: datos["usos_restantes"] = int(datos["usos_restantes"])
+        if "monto_minimo" in datos: datos["monto_minimo"] = float(datos["monto_minimo"])
         supabase.table("codigos_descuento").update(datos).eq("id", codigo_id).execute()
         return {"ok": True}
     except Exception as e:
