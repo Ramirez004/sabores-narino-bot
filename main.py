@@ -329,11 +329,16 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
 
     ahora = datetime.now(ZONA_HORARIA)
 
-    # ¿Ya tiene un pedido en estado "activo" (aún no aceptado)? Lo actualiza.
-    # Si el pedido activo ya está "preparando" (ya aceptado por el restaurante/domiciliario),
-    # NO se toca: se crea un pedido nuevo aparte para no perder ni retroceder el que ya está en curso.
+    # ¿Ya tiene un pedido en estado "activo" (aún no aceptado) EN ESTE MISMO RESTAURANTE?
+    # Lo actualiza. Si el pedido activo es de OTRO restaurante (el cliente cambió de
+    # restaurante antes de que le aceptaran el primero) o ya está "preparando" (ya
+    # aceptado), NO se toca: se crea un pedido nuevo aparte, para no mezclar el pedido
+    # de un restaurante con el de otro ni perder/retroceder el que ya está en curso.
     activos = get_pedidos_activos(numero)
-    pedido_para_actualizar = next((p for p in activos if p["estado"] == "activo"), None)
+    pedido_para_actualizar = next(
+        (p for p in activos if p["estado"] == "activo" and p.get("restaurante_id") == rest_key),
+        None,
+    )
     if pedido_para_actualizar:
         pedido_id = pedido_para_actualizar["id"]
         supabase.table("pedidos").update({
