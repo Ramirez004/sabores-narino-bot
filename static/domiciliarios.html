@@ -317,6 +317,8 @@ async function cargarDatos() {
 
 async function toggleDisponible() {
   const nuevoValor = !disponible;
+  disponible = nuevoValor; // optimista: se ve el cambio al instante, sin esperar al servidor
+  render();
   try {
     const r = await fetch(`${API}/api/domiciliario/disponibilidad`, {
       method: "POST", headers: {"Content-Type":"application/json"},
@@ -324,39 +326,46 @@ async function toggleDisponible() {
     });
     const d = await r.json();
     if (d.ok) {
-      disponible = nuevoValor;
-      render();
       if (disponible) cargarDatos();
     } else {
+      disponible = !nuevoValor; // el servidor lo rechazó: revertimos
+      render();
       toast(d.msg || "No se pudo cambiar tu disponibilidad");
     }
   } catch (e) {
+    disponible = !nuevoValor;
+    render();
     toast("Error de conexión, intenta de nuevo");
   }
 }
 
-async function aceptarPedido(pedidoId) {
-  const r = await fetch(`${API}/api/domiciliario/aceptar`, {
-    method: "POST", headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({ dom_id: domId, token: domToken, pedido_id: pedidoId })
-  });
-  const d = await r.json();
-  if (d.ok) {
-    toast("¡Pedido aceptado!");
-    cargarDatos();
-  } else {
-    toast(d.msg || "Este pedido ya fue tomado");
-    cargarDatos();
+async function aceptarPedido(pedidoId, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = "Aceptando..."; }
+  try {
+    const r = await fetch(`${API}/api/domiciliario/aceptar`, {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ dom_id: domId, token: domToken, pedido_id: pedidoId })
+    });
+    const d = await r.json();
+    toast(d.ok ? "¡Pedido aceptado!" : (d.msg || "Este pedido ya fue tomado"));
+  } catch (e) {
+    toast("Error de conexión, intenta de nuevo");
   }
+  cargarDatos();
 }
 
-async function marcarEntregado(pedidoId) {
+async function marcarEntregado(pedidoId, btn) {
   if (!confirm("¿Confirmas que entregaste este pedido?")) return;
-  await fetch(`${API}/api/domiciliario/entregado`, {
-    method: "POST", headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({ dom_id: domId, token: domToken, pedido_id: pedidoId })
-  });
-  toast("¡Pedido entregado!");
+  if (btn) { btn.disabled = true; btn.textContent = "Enviando..."; }
+  try {
+    await fetch(`${API}/api/domiciliario/entregado`, {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ dom_id: domId, token: domToken, pedido_id: pedidoId })
+    });
+    toast("¡Pedido entregado!");
+  } catch (e) {
+    toast("Error de conexión, intenta de nuevo");
+  }
   cargarDatos();
 }
 
@@ -365,6 +374,12 @@ function renderApp() {
   cargarDatos();
   if (polling) clearInterval(polling);
   polling = setInterval(cargarDatos, 5000);
+}
+
+async function actualizarManual(btn) {
+  if (btn) btn.style.opacity = "0.4";
+  await cargarDatos();
+  if (btn) btn.style.opacity = "1";
 }
 
 const METODO_PAGO_LBL = {efectivo:'Efectivo', nequi:'Nequi', bre_b:'Bre-B'};
@@ -399,7 +414,7 @@ function render() {
         <div class="info-row"><b>Cliente</b><span>${esc(p.cliente_nombre || "Sin nombre")}</span></div>
         <div class="info-row"><b>Dirección</b>${htmlDireccion(p.direccion)}</div>
         <div class="info-row"><b>Ganancia</b><span>${money(p.costo_domicilio)}</span></div>
-        <button class="btn-aceptar" onclick="aceptarPedido('${p.id}')">Aceptar pedido</button>
+        <button class="btn-aceptar" onclick="aceptarPedido('${p.id}', this)">Aceptar pedido</button>
       </div>
     `).join("");
   } else if (!disponible) {
@@ -420,7 +435,7 @@ function render() {
             <div class="dir">${htmlDireccion(p.direccion)}</div>
             ${htmlPagoDom(p)}
             <div class="resumen">${esc(p.resumen || "")}</div>
-            <button class="btn-entregado" onclick="marcarEntregado('${p.id}')">Marcar como entregado</button>
+            <button class="btn-entregado" onclick="marcarEntregado('${p.id}', this)">Marcar como entregado</button>
           </div>
         `).join("")}
       </div>
@@ -431,6 +446,7 @@ function render() {
     <header>
       <div class="saludo">${esc(domiciliario)}<span>${stats.pedidos_hoy || 0} entregas hoy</span></div>
       <div class="header-actions">
+        <button class="icon-btn" onclick="actualizarManual(this)" title="Actualizar">↻</button>
         <button class="icon-btn" onclick="toggleTheme()" title="Cambiar tema">${temaActual === "dark" ? "☀" : "☾"}</button>
         <div class="toggle-wrap">
           <span class="toggle-label">${disponible ? "Disponible" : "Desconectado"}</span>
