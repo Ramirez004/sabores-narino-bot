@@ -912,6 +912,12 @@
       color: var(--text);
     }
 
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; z-index: 999; padding: 20px; }
+    .modal-overlay.show { display: flex; }
+    .modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; width: 100%; max-width: 380px; box-shadow: var(--shadow-md); }
+    .modal-box h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 16px; }
+    .modal-box .modal-btns { display: flex; gap: 8px; margin-top: 18px; justify-content: flex-end; }
+
     /* Responsive */
     @media (max-width: 1024px) {
       .sidebar {
@@ -1107,6 +1113,10 @@
         <div class="nav-item" id="nav-analitica" onclick="mostrarVista('analitica')">
           <span class="nav-icon">▢</span>
           <span>Analítica</span>
+        </div>
+        <div class="nav-item" id="nav-codigos" onclick="mostrarVista('codigos')">
+          <span class="nav-icon">%</span>
+          <span>Códigos</span>
         </div>
       </nav>
 
@@ -1336,11 +1346,33 @@
             </div>
           </div>
         </div>
+
+        <!-- VISTA: CÓDIGOS -->
+        <div id="view-codigos" class="view" style="display: none;">
+          <div class="section">
+            <div class="section-header">
+              <span class="section-icon">%</span>
+              <div>
+                <div class="section-title">Códigos de descuento</div>
+                <div class="section-subtitle">Crea códigos propios de tu restaurante</div>
+              </div>
+            </div>
+            <button class="btn btn-primary" onclick="abrirModalCodigoRest()" style="margin-bottom:16px">✓ Nuevo código</button>
+            <table style="width:100%;font-size:.85rem">
+              <thead><tr style="text-align:left;color:var(--text2)"><th>Código</th><th>Descuento</th><th>Usos</th><th>Estado</th><th></th></tr></thead>
+              <tbody id="tabla-codigos-rest"><tr><td colspan="5" style="color:var(--text3);padding:16px 0">Cargando...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </main>
   </div>
 
   <div class="toast" id="toast"></div>
+
+  <div class="modal-overlay" id="modal-overlay-codigo" onclick="if(event.target===this)cerrarModalCodigoRest()">
+    <div class="modal-box" id="modal-content-codigo"></div>
+  </div>
 
   <script>
     // ── TEMA CLARO / OSCURO ──
@@ -1387,7 +1419,7 @@
     }
 
     // ── NAVEGACIÓN POR SECCIONES ──
-    const VISTAS_VALIDAS = ["dashboard","pedidos","menu","horario","config","analitica"];
+    const VISTAS_VALIDAS = ["dashboard","pedidos","menu","horario","config","analitica","codigos"];
     let vistaActual = "dashboard";
     function mostrarVista(vista){
       document.getElementById(`view-${vistaActual}`).style.display = "none";
@@ -1396,6 +1428,7 @@
       document.getElementById(`view-${vista}`).style.display = "block";
       document.getElementById(`nav-${vista}`).classList.add("active");
       localStorage.setItem("panel-restaurante-vista", vista);
+      if(vista === "codigos") cargarCodigosRest();
     }
 
     (function restaurarVista(){
@@ -1723,6 +1756,75 @@
       const r=await fetch('/api/restaurante-panel/horario',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({horario_semanal})});
       const d=await r.json();
       if(d.ok){toast('Horario guardado');}else{toast(d.msg||'Error al guardar','error');}
+    }
+
+    // ── CÓDIGOS DE DESCUENTO ──
+    let codigosRestCache = [];
+    function fmtDescuentoRest(c){
+      return c.tipo === 'porcentaje' ? `${c.valor}%` : `$${Number(c.valor).toLocaleString('es-CO')}`;
+    }
+    async function cargarCodigosRest(){
+      const r = await fetch('/api/restaurante-panel/codigos');
+      const d = await r.json();
+      const tbody = document.getElementById('tabla-codigos-rest');
+      if(!d.ok || !tbody) return;
+      codigosRestCache = d.data || [];
+      if(!codigosRestCache.length){ tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text3);padding:16px 0">Aún no has creado códigos</td></tr>'; return; }
+      tbody.innerHTML = codigosRestCache.map(c => {
+        const agotado = c.usos_restantes <= 0;
+        const estadoOk = c.activo && !agotado;
+        return `<tr>
+          <td><strong>${esc(c.codigo)}</strong></td>
+          <td>${fmtDescuentoRest(c)}</td>
+          <td>${c.usos_restantes} / ${c.usos_totales}</td>
+          <td><span class="badge ${estadoOk ? 'badge-success' : 'badge-danger'}">${estadoOk ? 'Activo' : (agotado ? 'Agotado' : 'Inactivo')}</span></td>
+          <td><button class="btn btn-ghost btn-sm" onclick="eliminarCodigoRest(${c.id})">Eliminar</button></td>
+        </tr>`;
+      }).join('');
+    }
+
+    function abrirModalCodigoRest(){
+      document.getElementById('modal-content-codigo').innerHTML = `
+        <h3>Nuevo código de descuento</h3>
+        <div class="form-group"><label>Código</label><input id="fr-cod-texto" placeholder="FRISBY20" style="text-transform:uppercase"></div>
+        <div class="form-group">
+          <label>Tipo de descuento</label>
+          <select id="fr-cod-tipo">
+            <option value="porcentaje">Porcentaje (%)</option>
+            <option value="fijo">Monto fijo ($)</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Valor</label><input id="fr-cod-valor" type="number" min="0" value="10"></div>
+        <div class="form-group"><label>Usos totales disponibles</label><input id="fr-cod-usos" type="number" min="1" value="50"></div>
+        <div class="modal-btns">
+          <button class="btn btn-secondary" onclick="cerrarModalCodigoRest()">Cancelar</button>
+          <button class="btn btn-primary" onclick="guardarCodigoRest()">Guardar</button>
+        </div>
+      `;
+      document.getElementById('modal-overlay-codigo').classList.add('show');
+    }
+    function cerrarModalCodigoRest(){ document.getElementById('modal-overlay-codigo').classList.remove('show'); }
+
+    async function guardarCodigoRest(){
+      const datos = {
+        codigo: document.getElementById('fr-cod-texto').value.trim(),
+        tipo: document.getElementById('fr-cod-tipo').value,
+        valor: parseFloat(document.getElementById('fr-cod-valor').value) || 0,
+        usos_totales: parseInt(document.getElementById('fr-cod-usos').value) || 1,
+      };
+      if(!datos.codigo){ toast('El código es obligatorio', 'error'); return; }
+      const r = await fetch('/api/restaurante-panel/codigos', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(datos)});
+      const d = await r.json();
+      if(d.ok){ toast('Código creado'); cerrarModalCodigoRest(); cargarCodigosRest(); }
+      else{ toast(d.msg || 'Error al guardar', 'error'); }
+    }
+
+    async function eliminarCodigoRest(id){
+      if(!confirm('¿Eliminar este código?')) return;
+      const r = await fetch(`/api/restaurante-panel/codigos/${id}`, {method:'DELETE'});
+      const d = await r.json();
+      if(d.ok){ toast('Código eliminado'); cargarCodigosRest(); }
+      else{ toast(d.msg || 'Error', 'error'); }
     }
 
     cargarTodo();

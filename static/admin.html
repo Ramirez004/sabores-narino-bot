@@ -173,6 +173,7 @@ tr:hover td{background:var(--surface2)}
       <div class="nav-item" onclick="showTab('menu')" id="nav-menu"><span class="icon">☰</span> Menús</div>
       <div class="nav-item" onclick="showTab('domiciliarios')" id="nav-domiciliarios"><span class="icon">⊙</span> Domiciliarios</div>
       <div class="nav-item" onclick="showTab('clientes')" id="nav-clientes"><span class="icon">◯</span> Clientes</div>
+      <div class="nav-item" onclick="showTab('codigos')" id="nav-codigos"><span class="icon">%</span> Códigos</div>
     </nav>
     <div style="margin-top:auto;padding:20px;display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--border)">
       <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle-btn"><span id="theme-toggle-icon">☾</span> <span id="theme-toggle-label">Modo oscuro</span></button>
@@ -264,6 +265,20 @@ tr:hover td{background:var(--surface2)}
         </table>
       </div>
     </div>
+
+    <!-- CÓDIGOS DE DESCUENTO -->
+    <div id="tab-codigos" style="display:none">
+      <div class="topbar">
+        <div><h2>Códigos de descuento</h2><p>Códigos de Caza Delivery o de un restaurante específico</p></div>
+        <button class="btn btn-primary" onclick="abrirModalCodigo()">+ Nuevo código</button>
+      </div>
+      <div class="section">
+        <table>
+          <thead><tr><th>Código</th><th>Aplica a</th><th>Descuento</th><th>Usos</th><th>Estado</th><th>Acciones</th></tr></thead>
+          <tbody id="tabla-codigos"><tr class="empty-row"><td colspan="6">Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -320,6 +335,7 @@ function showTab(tab) {
   if (tab === "menu") { cargarRestaurantes(); cargarMenu(); }
   if (tab === "domiciliarios") cargarDomiciliarios();
   if (tab === "clientes") cargarClientes();
+  if (tab === "codigos") { cargarRestaurantes(); cargarCodigos(); }
 }
 
 async function api(method, path, body) {
@@ -709,6 +725,92 @@ async function cargarClientes() {
       <td style="font-size:.75rem;color:var(--text2)">${c.fecha_registro?new Date(c.fecha_registro).toLocaleDateString("es-CO"):""}</td>
     </tr>
   `).join("");
+}
+
+// ── CÓDIGOS DE DESCUENTO ──
+let codigosCache = [];
+function fmtDescuento(c) {
+  return c.tipo === "porcentaje" ? `${c.valor}%` : `$${Number(c.valor).toLocaleString("es-CO")}`;
+}
+async function cargarCodigos() {
+  const d = await api("GET", "/api/admin/codigos");
+  if (!d.ok) return;
+  codigosCache = d.data || [];
+  const tbody = document.getElementById("tabla-codigos");
+  if (!codigosCache.length) { tbody.innerHTML='<tr class="empty-row"><td colspan="6">No hay códigos creados</td></tr>'; return; }
+  tbody.innerHTML = codigosCache.map(c => {
+    const rest = restaurantes.find(r => r.id === c.restaurante_id);
+    const aplica = rest ? esc(rest.nombre) : "Caza Delivery (todos)";
+    const agotado = c.usos_restantes <= 0;
+    return `
+    <tr>
+      <td><strong>${esc(c.codigo)}</strong></td>
+      <td style="font-size:.8rem;color:var(--text2)">${aplica}</td>
+      <td>${fmtDescuento(c)}</td>
+      <td style="font-size:.8rem">${c.usos_restantes} / ${c.usos_totales}</td>
+      <td><span class="badge ${c.activo && !agotado ? "badge-green" : "badge-red"}">${c.activo && !agotado ? "Activo" : (agotado ? "Agotado" : "Inactivo")}</span></td>
+      <td>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm btn-icon" title="Editar" onclick='abrirModalCodigo(${JSON.stringify(c)})'>✎</button>
+          <button class="btn btn-danger btn-sm btn-icon" title="Eliminar" onclick="eliminarCodigo(${c.id})">✕</button>
+        </div>
+      </td>
+    </tr>
+  `; }).join("");
+}
+
+function abrirModalCodigo(c) {
+  const esEditar = !!c;
+  document.getElementById("modal-content").innerHTML = `
+    <h3>${esEditar ? "Editar" : "Nuevo"} código de descuento</h3>
+    <div class="form-group"><label>Código</label><input id="f-cod-texto" value="${c?.codigo||""}" placeholder="CAZA10" ${esEditar?"disabled":""} style="text-transform:uppercase"></div>
+    <div class="form-group">
+      <label>Aplica a</label>
+      <select id="f-cod-restaurante">
+        <option value="">Caza Delivery (todos los restaurantes)</option>
+        ${restaurantes.map(r => `<option value="${r.id}" ${c?.restaurante_id===r.id?"selected":""}>${esc(r.nombre)}</option>`).join("")}
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Tipo de descuento</label>
+      <select id="f-cod-tipo">
+        <option value="porcentaje" ${(!c||c?.tipo==="porcentaje")?"selected":""}>Porcentaje (%)</option>
+        <option value="fijo" ${c?.tipo==="fijo"?"selected":""}>Monto fijo ($)</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Valor</label><input id="f-cod-valor" type="number" min="0" value="${c?.valor??10}" placeholder="10"></div>
+    <div class="form-group"><label>Usos totales disponibles</label><input id="f-cod-usos" type="number" min="1" value="${c?.usos_totales??50}"></div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost" onclick="cerrarModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarCodigo(${esEditar}, ${c?.id||"null"})">Guardar</button>
+    </div>
+  `;
+  document.getElementById("modal-overlay").style.display = "flex";
+}
+
+async function guardarCodigo(esEditar, id) {
+  const datos = {
+    codigo: document.getElementById("f-cod-texto").value.trim(),
+    restaurante_id: document.getElementById("f-cod-restaurante").value || null,
+    tipo: document.getElementById("f-cod-tipo").value,
+    valor: parseFloat(document.getElementById("f-cod-valor").value) || 0,
+    usos_totales: parseInt(document.getElementById("f-cod-usos").value) || 1,
+  };
+  let d;
+  if (esEditar) {
+    d = await fetch(`/api/admin/codigos/${id}`, {method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(datos)}).then(r=>r.json());
+  } else {
+    d = await api("POST", "/api/admin/codigos", datos);
+  }
+  if (d.ok) { toast("Guardado correctamente","success"); cerrarModal(); cargarCodigos(); }
+  else toast(d.msg||"Error","error");
+}
+
+async function eliminarCodigo(id) {
+  if (!confirm("¿Eliminar este código de descuento?")) return;
+  const d = await fetch(`/api/admin/codigos/${id}`, {method:"DELETE"}).then(r=>r.json());
+  if (d.ok) { toast("Eliminado correctamente","success"); cargarCodigos(); }
+  else toast(d.msg||"Error","error");
 }
 
 function cerrarModal() { document.getElementById("modal-overlay").style.display = "none"; }
