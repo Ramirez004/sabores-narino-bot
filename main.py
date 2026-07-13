@@ -1554,6 +1554,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .bar-lbl{font-size:.68rem;color:var(--text2);text-align:center;font-weight:500;max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bar-val{font-size:.72rem;color:var(--accent1);font-weight:700}
 @media(max-width:768px){
+  .layout{flex-direction:column}
   .sidebar{position:static;width:100%;height:auto;flex-direction:row;align-items:center;padding:10px;overflow-x:auto}
   .sidebar-logo,.sidebar-footer{display:none}
   .sidebar nav{display:flex;flex-direction:row;gap:4px}
