@@ -1033,23 +1033,62 @@ LOGIN_RESTAURANTE_HTML = """<!DOCTYPE html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Panel del restaurante — Ipiales Delivery</title>
 <style>
-*{box-sizing:border-box}body{background:#FFF8E7;font-family:'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;color:#222}
-.box{background:#fff;border:1px solid #FFE2A8;box-shadow:0 8px 28px rgba(0,0,0,.08);padding:32px 28px;border-radius:16px;text-align:center;width:90%;max-width:340px}
-h1{font-size:1.3rem;margin-bottom:4px}h1 span{color:#F57C00}p{color:#9a8a6b;margin-bottom:20px;font-size:.87rem}
-input{width:100%;padding:12px;background:#FFFBF2;border:1px solid #FFE2A8;border-radius:10px;font-size:1rem;outline:none;margin-bottom:12px}
-input:focus{border-color:#FFC107;box-shadow:0 0 0 3px rgba(255,193,7,.18)}
-button{width:100%;padding:12px;background:linear-gradient(135deg,#FFC107,#F57C00);border:none;border-radius:10px;color:#1a1a1a;font-weight:700;font-size:1rem;cursor:pointer}
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#fafafa;--surface:#ffffff;--border:#efefef;--text:#2a2a2a;--text2:#999999;
+  --accent1:#667eea;--accent2:#764ba2;--accent-ring:rgba(102,126,234,.18);
+  --red:#d32f2f;
+}
+:root[data-theme="dark"]{
+  --bg:#12151a;--surface:#1a1e24;--border:#2a2f37;--text:#e8e8e8;--text2:#7a8088;--red:#f28b8b;
+}
+@media(prefers-color-scheme:dark){
+  :root:not([data-theme="light"]):not([data-theme="dark"]){
+    --bg:#12151a;--surface:#1a1e24;--border:#2a2f37;--text:#e8e8e8;--text2:#7a8088;--red:#f28b8b;
+  }
+}
+body{background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;color:var(--text);transition:background .2s ease,color .2s ease}
+.box{background:var(--surface);border:1px solid var(--border);box-shadow:0 8px 28px rgba(0,0,0,.08);padding:32px 28px;border-radius:16px;text-align:center;width:90%;max-width:340px;position:relative}
+.logo{width:48px;height:48px;margin:0 auto 14px;background:linear-gradient(135deg,var(--accent1) 0%,var(--accent2) 100%);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#fff}
+h1{font-size:1.2rem;margin-bottom:4px;font-weight:700}
+h1 span{background:linear-gradient(135deg,var(--accent1) 0%,var(--accent2) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+p{color:var(--text2);margin-bottom:20px;font-size:.87rem}
+input{width:100%;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;font-size:1rem;outline:none;margin-bottom:12px;color:var(--text);font-family:inherit}
+input:focus{border-color:var(--accent1);box-shadow:0 0 0 3px var(--accent-ring)}
+button{width:100%;padding:12px;background:linear-gradient(135deg,var(--accent1) 0%,var(--accent2) 100%);border:none;border-radius:10px;color:#fff;font-weight:700;font-size:1rem;cursor:pointer;transition:filter .15s ease}
+button:hover{filter:brightness(1.08)}
+.theme-toggle{margin-top:16px;background:none;border:none;color:var(--text2);font-size:.78rem;cursor:pointer;width:auto;padding:6px}
+.theme-toggle:hover{color:var(--text)}
 </style></head><body>
 <div class="box">
-  <h1>🍽️ Panel de <span>tu restaurante</span></h1>
+  <div class="logo">R</div>
+  <h1>Panel de <span>tu restaurante</span></h1>
   <p>Ipiales Delivery</p>
   <form id="form-login">
     <input type="password" id="pw" placeholder="Contraseña de tu restaurante" autofocus>
-    <div class="err" id="err" style="color:#c0392b;font-size:.82rem;margin:-6px 0 12px;display:none">Contraseña incorrecta</div>
+    <div class="err" id="err" style="color:var(--red);font-size:.82rem;margin:-6px 0 12px;display:none">Contraseña incorrecta</div>
     <button type="submit">Entrar</button>
   </form>
+  <button class="theme-toggle" onclick="toggleTemaLogin()" id="theme-toggle-btn"><span id="theme-toggle-icon">☾</span> <span id="theme-toggle-label">Modo oscuro</span></button>
 </div>
 <script>
+function aplicarTemaLogin(tema) {
+  document.documentElement.setAttribute("data-theme", tema);
+  document.getElementById("theme-toggle-icon").textContent = tema === "dark" ? "☀" : "☾";
+  document.getElementById("theme-toggle-label").textContent = tema === "dark" ? "Modo claro" : "Modo oscuro";
+}
+function toggleTemaLogin() {
+  const actual = document.documentElement.getAttribute("data-theme");
+  const nuevo = actual === "dark" ? "light" : "dark";
+  localStorage.setItem("panel-restaurante-theme", nuevo);
+  aplicarTemaLogin(nuevo);
+}
+(function initTemaLogin() {
+  const guardado = localStorage.getItem("panel-restaurante-theme");
+  const tema = guardado || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  aplicarTemaLogin(tema);
+})();
+
 document.getElementById('form-login').onsubmit = async function(e) {
   e.preventDefault();
   const err = document.getElementById('err');
