@@ -2171,6 +2171,13 @@ async def aceptar_pedido_dom(request: Request):
             f"✅ *Pedido #{pedido_id} aceptado*\n"
             f"🛵 Domiciliario: *{nombre}*\n"
             f"👉 {os.getenv('PANEL_URL', '')}/panel")
+        # Notificar al restaurante que ya hay domiciliario asignado
+        r_pedido = get_restaurante(pedido_check.get("restaurante_id", ""))
+        numero_rest = r_pedido.get("whatsapp_notificacion") if r_pedido else None
+        if numero_rest:
+            enviar_whatsapp(numero_rest,
+                f"🛵 *Domiciliario asignado al pedido #{pedido_id}*\n"
+                f"*{nombre}* aceptó la entrega y va en camino a recogerlo.")
         # Notificar al cliente
         pedido = get_pedido_by_id(pedido_id)
         if pedido:
@@ -2199,18 +2206,24 @@ async def marcar_entregado_dom(request: Request):
     pedido_id = body.get("pedido_id", "")
     if not pedido_asignado_a(pedido_id, dom["id"]):
         return {"ok": False, "msg": "Este pedido no está asignado a ti"}
-    actualizar_estado_pedido(pedido_id, "entregado")
     pedido = get_pedido_by_id(pedido_id)
-    if pedido:
-        enviar_whatsapp(pedido["numero_cliente"],
-            f"🙌 *¡Pedido #{pedido_id} entregado!*\n"
-            f"Esperamos que lo disfrutes 😊\n"
-            f"¡Gracias por pedir en Ipiales Delivery!")
-        enviar_whatsapp(pedido["numero_cliente"],
-            "⭐ ¿Cómo calificarías el servicio? Responde del 1 al 5 (puedes agregar un comentario si quieres).")
-        clientes_esperando_calificacion.setdefault(pedido["numero_cliente"], []).append(pedido_id)
-        enviar_whatsapp(ADMIN_NUMBER,
-            f"✅ *Pedido #{pedido_id} entregado*\n🛵 Por: {nombre}")
+    if not pedido:
+        return {"ok": False, "msg": "Este pedido ya no existe"}
+    if pedido.get("estado") == "entregado":
+        # Ya se había marcado como entregado antes (ej. el domiciliario tocó el
+        # botón varias veces porque tardó en responder) — no reenviamos los
+        # avisos ni volvemos a sumar el contador de entregas.
+        return {"ok": True}
+    actualizar_estado_pedido(pedido_id, "entregado")
+    enviar_whatsapp(pedido["numero_cliente"],
+        f"🙌 *¡Pedido #{pedido_id} entregado!*\n"
+        f"Esperamos que lo disfrutes 😊\n"
+        f"¡Gracias por pedir en Ipiales Delivery!")
+    enviar_whatsapp(pedido["numero_cliente"],
+        "⭐ ¿Cómo calificarías el servicio? Responde del 1 al 5 (puedes agregar un comentario si quieres).")
+    clientes_esperando_calificacion.setdefault(pedido["numero_cliente"], []).append(pedido_id)
+    enviar_whatsapp(ADMIN_NUMBER,
+        f"✅ *Pedido #{pedido_id} entregado*\n🛵 Por: {nombre}")
     # Actualizar contador domiciliario
     supabase.table("domiciliarios").update({
         "pedidos_completados": (dom.get("pedidos_completados") or 0) + 1
@@ -2721,10 +2734,10 @@ async def recibir_mensaje(request: Request):
             pedido, es_nuevo = crear_pedido(numero, resumen, texto_respuesta, rest_key, datos)
             notificar_pedido_admin(numero, pedido, es_nuevo)
             notificar_pedido_restaurante(pedido, rest_key, es_nuevo)
-            # Aviso automático a domiciliarios en turno (sin esperar a que
-            # alguien presione "Buscar domiciliario" en el panel)
-            if es_nuevo and pedido.get("tipo") == "domicilio":
-                notificar_domiciliarios_whatsapp(pedido)
+            # La búsqueda de domiciliario ya NO es automática: el restaurante la
+            # dispara a propósito con el botón "Buscar domiciliario" en su panel
+            # (para no avisarles de un pedido que el restaurante ni siquiera ha
+            # revisado o aceptado todavía).
 
     except Exception:
         traceback.print_exc()
