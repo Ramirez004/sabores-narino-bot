@@ -1084,27 +1084,27 @@
       </div>
 
       <nav class="sidebar-nav">
-        <div class="nav-item active">
+        <div class="nav-item active" id="nav-dashboard" onclick="mostrarVista('dashboard')">
           <span class="nav-icon">▭</span>
           <span>Dashboard</span>
         </div>
-        <div class="nav-item">
+        <div class="nav-item" id="nav-pedidos" onclick="mostrarVista('pedidos')">
           <span class="nav-icon">☰</span>
           <span>Pedidos</span>
         </div>
-        <div class="nav-item">
+        <div class="nav-item" id="nav-menu" onclick="mostrarVista('menu')">
           <span class="nav-icon">⊞</span>
           <span>Menú</span>
         </div>
-        <div class="nav-item">
+        <div class="nav-item" id="nav-horario" onclick="mostrarVista('horario')">
           <span class="nav-icon">◐</span>
           <span>Horario</span>
         </div>
-        <div class="nav-item">
+        <div class="nav-item" id="nav-config" onclick="mostrarVista('config')">
           <span class="nav-icon">⚙</span>
           <span>Configuración</span>
         </div>
-        <div class="nav-item">
+        <div class="nav-item" id="nav-analitica" onclick="mostrarVista('analitica')">
           <span class="nav-icon">▢</span>
           <span>Analítica</span>
         </div>
@@ -1147,172 +1147,194 @@
 
       <!-- Content -->
       <div class="content">
-        <!-- KPI Cards -->
-        <div class="kpi-grid">
-          <div class="kpi-card">
-            <div class="kpi-label">Pedidos Hoy</div>
-            <div class="kpi-value" id="v-cant">0</div>
-          </div>
-          <div class="kpi-card accent">
-            <div class="kpi-label">Total Vendido</div>
-            <div class="kpi-value" id="v-total">$0</div>
-          </div>
-          <div class="kpi-card danger">
-            <div class="kpi-label">Cancelados</div>
-            <div class="kpi-value" id="v-cancel">0</div>
-          </div>
-        </div>
-
-        <!-- Statistics Section -->
-        <div class="section">
-          <div class="section-header">
-            <span class="section-icon">▢</span>
-            <div>
-              <div class="section-title">Mis estadísticas</div>
-              <div class="section-subtitle">Resumen de ventas y desempeño</div>
-            </div>
-          </div>
-
+        <!-- VISTA: DASHBOARD -->
+        <div id="view-dashboard" class="view">
           <div class="kpi-grid">
             <div class="kpi-card">
               <div class="kpi-label">Pedidos Hoy</div>
-              <div class="kpi-value" id="st-pedidos-hoy">—</div>
+              <div class="kpi-value" id="v-cant">0</div>
             </div>
             <div class="kpi-card accent">
-              <div class="kpi-label">Ventas Hoy</div>
-              <div class="kpi-value" id="st-ventas-hoy">—</div>
+              <div class="kpi-label">Total Vendido</div>
+              <div class="kpi-value" id="v-total">$0</div>
             </div>
-            <div class="kpi-card">
-              <div class="kpi-label">Ventas Semana</div>
-              <div class="kpi-value" id="st-ventas-semana">—</div>
-            </div>
-            <div class="kpi-card">
-              <div class="kpi-label">Calificación</div>
-              <div class="kpi-value" id="st-calificacion">—</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Menu Section -->
-        <div class="section">
-          <div class="section-header">
-            <span class="section-icon">⊞</span>
-            <div>
-              <div class="section-title">Mi menú</div>
-              <div class="section-subtitle">Gestiona disponibilidad de productos</div>
-            </div>
-          </div>
-          <div id="mi-menu-lista">Cargando...</div>
-        </div>
-
-        <!-- Schedule Section -->
-        <div class="section">
-          <div class="section-header">
-            <span class="section-icon">◐</span>
-            <div>
-              <div class="section-title">Mi horario</div>
-              <div class="section-subtitle">Configura tu disponibilidad</div>
+            <div class="kpi-card danger">
+              <div class="kpi-label">Cancelados</div>
+              <div class="kpi-value" id="v-cancel">0</div>
             </div>
           </div>
 
-          <div class="form-row">
-            <div class="form-group" style="flex: 0 0 auto;">
-              <label>
-                <input type="checkbox" id="f-usar-horario-semanal" onchange="toggleHorarioSemanalRest()" style="margin-right: 6px;">
-                Usar horario distinto por día
-              </label>
-            </div>
-          </div>
-
-          <div id="horario-semanal-editor-rest" class="horario-box" style="display: none; margin-bottom: 16px;"></div>
-
-          <button class="btn btn-primary" onclick="guardarHorario()">✓ Guardar horario</button>
-        </div>
-
-        <!-- Status Section -->
-        <div class="section">
-          <div class="section-header">
-            <span class="section-icon">⚙</span>
-            <div>
-              <div class="section-title">Estado de hoy</div>
-              <div class="section-subtitle">Configuración del día</div>
-            </div>
-          </div>
-
-          <div id="estado-badge" style="margin-bottom: 16px;"></div>
-
-          <div class="form-row">
-            <div class="form-group" style="flex: 0 0 auto;">
-              <label>Domicilio</label>
-              <div class="toggle-wrap">
-                <button class="toggle" id="toggle-dom" onclick="toggleDomicilio()"><div class="knob"></div></button>
-                <span class="toggle-label" id="toggle-dom-lbl"></span>
+          <div class="section">
+            <div class="section-header">
+              <span class="section-icon">⚙</span>
+              <div>
+                <div class="section-title">Estado de hoy</div>
+                <div class="section-subtitle">Resumen rápido de tu restaurante</div>
               </div>
             </div>
-            <div class="form-group">
-              <label>Tiempo de espera (minutos)</label>
-              <input type="number" id="f-espera" min="0" placeholder="Ej: 20">
-            </div>
-            <div class="form-group" style="flex: 0 0 auto;">
-              <button class="btn btn-secondary" onclick="abrirForzadoHoy()">◐ Abrir fuera de horario</button>
-            </div>
-          </div>
-
-          <div class="form-row">
-            <div class="form-group" style="flex: 1 1 100%;">
-              <label>Notas del día (una por línea)</label>
-              <textarea id="f-notas" placeholder="Ej: No hay pepperoni&#10;Demora en entregas"></textarea>
-            </div>
-          </div>
-
-          <button class="btn btn-primary" onclick="guardarConfiguracion()">✓ Guardar cambios</button>
-        </div>
-
-        <!-- History Filter Section -->
-        <div class="section">
-          <div class="section-header">
-            <span class="section-icon">▭</span>
-            <div>
-              <div class="section-title">Historial por fecha</div>
-              <div class="section-subtitle">Filtra pedidos por rango de fechas</div>
-            </div>
-          </div>
-
-          <div class="form-row">
-            <div class="form-group">
-              <label>Desde</label>
-              <input type="date" id="f-filtro-desde">
-            </div>
-            <div class="form-group">
-              <label>Hasta</label>
-              <input type="date" id="f-filtro-hasta">
-            </div>
-            <div class="form-group" style="flex: 0 0 auto;">
-              <button class="btn btn-primary" onclick="cargarTodo()">⊙ Filtrar</button>
-              <button class="btn btn-secondary" onclick="limpiarFiltroFecha()">✕ Ver recientes</button>
-            </div>
+            <div id="estado-badge-dash"></div>
           </div>
         </div>
 
-        <!-- Orders Section -->
-        <div class="section">
-          <div class="section-header">
-            <span class="section-icon">☰</span>
-            <div>
-              <div class="section-title">Pedidos</div>
-              <div class="section-subtitle">Gestiona el estado de tus pedidos</div>
+        <!-- VISTA: PEDIDOS -->
+        <div id="view-pedidos" class="view" style="display: none;">
+          <div class="section">
+            <div class="section-header">
+              <span class="section-icon">▭</span>
+              <div>
+                <div class="section-title">Historial por fecha</div>
+                <div class="section-subtitle">Filtra pedidos por rango de fechas</div>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label>Desde</label>
+                <input type="date" id="f-filtro-desde">
+              </div>
+              <div class="form-group">
+                <label>Hasta</label>
+                <input type="date" id="f-filtro-hasta">
+              </div>
+              <div class="form-group" style="flex: 0 0 auto;">
+                <button class="btn btn-primary" onclick="cargarTodo()">⊙ Filtrar</button>
+                <button class="btn btn-secondary" onclick="limpiarFiltroFecha()">✕ Ver recientes</button>
+              </div>
             </div>
           </div>
 
-          <div class="tabs">
-            <button class="tab active" data-tab="todos" onclick="cambiarTab('todos')">Todos <span id="c-todos"></span></button>
-            <button class="tab" data-tab="preparacion" onclick="cambiarTab('preparacion')">Recibidos <span id="c-prep"></span></button>
-            <button class="tab" data-tab="enviados" onclick="cambiarTab('enviados')">Enviados <span id="c-env"></span></button>
-            <button class="tab" data-tab="entregados" onclick="cambiarTab('entregados')">Entregados <span id="c-ent"></span></button>
-          </div>
+          <div class="section">
+            <div class="section-header">
+              <span class="section-icon">☰</span>
+              <div>
+                <div class="section-title">Pedidos</div>
+                <div class="section-subtitle">Gestiona el estado de tus pedidos</div>
+              </div>
+            </div>
 
-          <div id="grid" class="grid"></div>
-          <div id="empty" class="empty" style="display: none;">No hay pedidos en esta pestaña</div>
+            <div class="tabs">
+              <button class="tab active" data-tab="todos" onclick="cambiarTab('todos')">Todos <span id="c-todos"></span></button>
+              <button class="tab" data-tab="preparacion" onclick="cambiarTab('preparacion')">Recibidos <span id="c-prep"></span></button>
+              <button class="tab" data-tab="enviados" onclick="cambiarTab('enviados')">Enviados <span id="c-env"></span></button>
+              <button class="tab" data-tab="entregados" onclick="cambiarTab('entregados')">Entregados <span id="c-ent"></span></button>
+            </div>
+
+            <div id="grid" class="grid"></div>
+            <div id="empty" class="empty" style="display: none;">No hay pedidos en esta pestaña</div>
+          </div>
+        </div>
+
+        <!-- VISTA: MENÚ -->
+        <div id="view-menu" class="view" style="display: none;">
+          <div class="section">
+            <div class="section-header">
+              <span class="section-icon">⊞</span>
+              <div>
+                <div class="section-title">Mi menú</div>
+                <div class="section-subtitle">Gestiona disponibilidad de productos</div>
+              </div>
+            </div>
+            <div id="mi-menu-lista">Cargando...</div>
+          </div>
+        </div>
+
+        <!-- VISTA: HORARIO -->
+        <div id="view-horario" class="view" style="display: none;">
+          <div class="section">
+            <div class="section-header">
+              <span class="section-icon">◐</span>
+              <div>
+                <div class="section-title">Mi horario</div>
+                <div class="section-subtitle">Configura tu disponibilidad</div>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group" style="flex: 0 0 auto;">
+                <label>
+                  <input type="checkbox" id="f-usar-horario-semanal" onchange="toggleHorarioSemanalRest()" style="margin-right: 6px;">
+                  Usar horario distinto por día
+                </label>
+              </div>
+            </div>
+
+            <div id="horario-semanal-editor-rest" class="horario-box" style="display: none; margin-bottom: 16px;"></div>
+
+            <button class="btn btn-primary" onclick="guardarHorario()">✓ Guardar horario</button>
+          </div>
+        </div>
+
+        <!-- VISTA: CONFIGURACIÓN -->
+        <div id="view-config" class="view" style="display: none;">
+          <div class="section">
+            <div class="section-header">
+              <span class="section-icon">⚙</span>
+              <div>
+                <div class="section-title">Estado de hoy</div>
+                <div class="section-subtitle">Configuración del día</div>
+              </div>
+            </div>
+
+            <div id="estado-badge" style="margin-bottom: 16px;"></div>
+
+            <div class="form-row">
+              <div class="form-group" style="flex: 0 0 auto;">
+                <label>Domicilio</label>
+                <div class="toggle-wrap">
+                  <button class="toggle" id="toggle-dom" onclick="toggleDomicilio()"><div class="knob"></div></button>
+                  <span class="toggle-label" id="toggle-dom-lbl"></span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Tiempo de espera (minutos)</label>
+                <input type="number" id="f-espera" min="0" placeholder="Ej: 20">
+              </div>
+              <div class="form-group" style="flex: 0 0 auto;">
+                <button class="btn btn-secondary" onclick="abrirForzadoHoy()">◐ Abrir fuera de horario</button>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group" style="flex: 1 1 100%;">
+                <label>Notas del día (una por línea)</label>
+                <textarea id="f-notas" placeholder="Ej: No hay pepperoni&#10;Demora en entregas"></textarea>
+              </div>
+            </div>
+
+            <button class="btn btn-primary" onclick="guardarConfiguracion()">✓ Guardar cambios</button>
+          </div>
+        </div>
+
+        <!-- VISTA: ANALÍTICA -->
+        <div id="view-analitica" class="view" style="display: none;">
+          <div class="section">
+            <div class="section-header">
+              <span class="section-icon">▢</span>
+              <div>
+                <div class="section-title">Mis estadísticas</div>
+                <div class="section-subtitle">Resumen de ventas y desempeño</div>
+              </div>
+            </div>
+
+            <div class="kpi-grid">
+              <div class="kpi-card">
+                <div class="kpi-label">Pedidos Hoy</div>
+                <div class="kpi-value" id="st-pedidos-hoy">—</div>
+              </div>
+              <div class="kpi-card accent">
+                <div class="kpi-label">Ventas Hoy</div>
+                <div class="kpi-value" id="st-ventas-hoy">—</div>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-label">Ventas Semana</div>
+                <div class="kpi-value" id="st-ventas-semana">—</div>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-label">Calificación</div>
+                <div class="kpi-value" id="st-calificacion">—</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </main>
@@ -1363,6 +1385,25 @@
         });
       }catch(e){}
     }
+
+    // ── NAVEGACIÓN POR SECCIONES ──
+    const VISTAS_VALIDAS = ["dashboard","pedidos","menu","horario","config","analitica"];
+    let vistaActual = "dashboard";
+    function mostrarVista(vista){
+      document.getElementById(`view-${vistaActual}`).style.display = "none";
+      document.getElementById(`nav-${vistaActual}`).classList.remove("active");
+      vistaActual = vista;
+      document.getElementById(`view-${vista}`).style.display = "block";
+      document.getElementById(`nav-${vista}`).classList.add("active");
+      localStorage.setItem("panel-restaurante-vista", vista);
+    }
+
+    (function restaurarVista(){
+      const guardada = localStorage.getItem("panel-restaurante-vista");
+      if(guardada && VISTAS_VALIDAS.includes(guardada) && guardada !== "dashboard"){
+        mostrarVista(guardada);
+      }
+    })();
 
     let todos=[], tabActual="todos", estadoActual={};
     let idsActivosConocidos = null;
@@ -1446,9 +1487,10 @@
     }
 
     function renderEstado(){
-      const badge=document.getElementById('estado-badge');
       const abierto=estadoActual.abierto_ahora;
-      badge.innerHTML=`<span class="badge ${abierto?'badge-success':'badge-danger'}">${abierto?'Abierto ahora':'Cerrado ahora'}</span>`;
+      const badgeHtml=`<span class="badge ${abierto?'badge-success':'badge-danger'}">${abierto?'Abierto ahora':'Cerrado ahora'}</span>`;
+      document.getElementById('estado-badge').innerHTML=badgeHtml;
+      document.getElementById('estado-badge-dash').innerHTML=badgeHtml;
       const dom=estadoActual.domicilio_activo!==false;
       document.getElementById('toggle-dom').className='toggle'+(dom?' on':'');
       document.getElementById('toggle-dom-lbl').textContent=dom?'Activo':'Desactivado';
