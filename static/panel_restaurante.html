@@ -1572,6 +1572,8 @@
       g.innerHTML=lista.map(p=>{
         const esFinal=p.estado==='entregado'||p.estado==='cancelado';
         const idxActual=orden.indexOf(p.estado);
+        const esTransferencia=p.metodo_pago==='nequi'||p.metodo_pago==='bre_b';
+        const pagoPendiente=esTransferencia&&!p.pago_confirmado;
         return `
         <div class="card">
           <div class="card-id">#${esc(p.id)}</div>
@@ -1583,11 +1585,12 @@
           <div class="card-summary">${esc(p.resumen||'')}</div>
           ${p.modificaciones&&p.modificaciones.length?`<div class="card-mods"><strong>Modificaciones:</strong><br>${p.modificaciones.map(esc).join('<br>')}</div>`:''}
           ${p.quejas&&p.quejas.length?`<div class="card-complaints"><strong>Quejas:</strong><br>${p.quejas.map(esc).join('<br>')}</div>`:''}
+          ${htmlPago(p, pagoPendiente, esFinal)}
           <div class="card-status ${p.estado}">${EST_MAP[p.estado]||p.estado}</div>
           ${!esFinal?htmlBotonDom(p):''}
           <div class="card-buttons">${BTNS.map(b=>{
             const idxBtn=orden.indexOf(b.k);
-            const bloqueado=esFinal||(idxBtn<idxActual&&b.k!=='cancelado');
+            const bloqueado=esFinal||(idxBtn<idxActual&&b.k!=='cancelado')||(pagoPendiente&&b.k!=='cancelado'&&b.k!=='activo');
             return `<button class="card-btn ${p.estado===b.k?'active':''}"
               title="${b.k}"
               ${bloqueado?'disabled':''}
@@ -1595,6 +1598,24 @@
           }).join('')}</div>
         </div>`;
       }).join('');
+    }
+
+    const METODO_PAGO_LBL={efectivo:'Efectivo',nequi:'Nequi',bre_b:'Bre-B'};
+    function htmlPago(p, pagoPendiente, esFinal){
+      if(!p.metodo_pago) return '';
+      const lbl=METODO_PAGO_LBL[p.metodo_pago]||p.metodo_pago;
+      if(!pagoPendiente){
+        return `<div class="badge badge-success" style="margin:8px 0">💳 ${lbl}${p.metodo_pago!=='efectivo'?' — pago confirmado':''}</div>`;
+      }
+      return `<div class="badge badge-danger" style="margin:8px 0">💳 ${lbl} — pago pendiente de confirmar</div>
+        ${!esFinal?`<button class="btn btn-primary" style="width:100%;margin:6px 0" onclick="confirmarPago('${p.id}')">Confirmar pago recibido</button>`:''}`;
+    }
+
+    async function confirmarPago(id){
+      const r=await fetch(`/api/restaurante-panel/pedidos/${id}/confirmar-pago`,{method:'POST'});
+      const d=await r.json();
+      if(d.ok){toast('Pago confirmado');cargarTodo();}
+      else{toast(d.msg||'Error','error');}
     }
 
     async function cargarStatsPropias(){

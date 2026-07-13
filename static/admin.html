@@ -467,6 +467,9 @@ function abrirModalRestaurante(r) {
     </div>
     <div class="form-group"><label>Contraseña del panel del restaurante (opcional)</label><input id="f-pw-panel" value="${r?.panel_password||""}" placeholder="Deja vacío para no darle panel propio"></div>
     <div class="form-group"><label>WhatsApp del restaurante para avisos de pedido (opcional)</label><input id="f-whatsapp-notif" value="${r?.whatsapp_notificacion||""}" placeholder="573145274437 (con código país, sin +)"></div>
+    <div class="form-group"><label>Número de Nequi para recibir pagos (opcional)</label><input id="f-nequi" value="${r?.nequi_numero||""}" placeholder="3145274437"></div>
+    <div class="form-group"><label>Llave Bre-B para recibir pagos (opcional)</label><input id="f-bre-b" value="${r?.llave_bre_b||""}" placeholder="3145274437 o la llave que uses"></div>
+    <p style="font-size:.72rem;color:var(--text2);margin:-8px 0 14px">Si dejas alguno vacío, el bot no lo ofrecerá como opción de pago al cliente. El pago en efectivo siempre está disponible.</p>
     ${(esEditar && r?.panel_password) ? `
     <div class="form-group">
       <label>Link del panel de este restaurante</label>
@@ -506,6 +509,8 @@ async function guardarRestaurante(esEditar, id) {
     whatsapp_notificacion: document.getElementById("f-whatsapp-notif").value.trim(),
     menu_modo: document.getElementById("f-menu-modo").value,
     menu_url: document.getElementById("f-menu-url").value.trim(),
+    nequi_numero: document.getElementById("f-nequi").value.trim(),
+    llave_bre_b: document.getElementById("f-bre-b").value.trim(),
   };
   if (!datos.nombre) { toast("El nombre es obligatorio","error"); return; }
   let d, rid;
