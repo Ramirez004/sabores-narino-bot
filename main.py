@@ -231,7 +231,8 @@ Formato exacto:
   "tipo": "domicilio" o "recoger",
   "direccion": "dirección completa si es domicilio, o vacío si es recoger",
   "total": numero_entero_sin_puntos_ni_simbolos,
-  "resumen_items": "lista de productos pedidos con cantidades y precios, en texto plano"
+  "resumen_items": "lista de productos pedidos con cantidades y precios, en texto plano",
+  "metodo_pago": "efectivo", "nequi", "bre_b" o null si no quedó claro
 }}
 
 Reglas:
@@ -240,6 +241,7 @@ Reglas:
 - Si el cliente dijo explícitamente que recoge en el local, o nunca mencionó dirección y el bot preguntó y confirmó "recoger", tipo es "recoger".
 - Si hay duda, prioriza "domicilio" si se mencionó algún lugar.
 - total debe ser el monto final incluyendo domicilio si aplica.
+- metodo_pago: "efectivo" si el cliente dijo que paga en efectivo/cash; "nequi" si mencionó Nequi; "bre_b" si mencionó Bre-B o "llave"; null si nunca se mencionó cómo paga.
 
 Conversación:
 {conversacion_texto}"""
@@ -293,6 +295,9 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
             m = re.search(r"Total:?\s*\$?\s?([\d.,]+)", resumen, re.IGNORECASE)
             if m:
                 total = int(m.group(1).replace(".", "").replace(",", ""))
+        metodo_pago = datos_estructurados.get("metodo_pago")
+        if metodo_pago not in ("efectivo", "nequi", "bre_b"):
+            metodo_pago = None
     else:
         # Respaldo: método anterior por si falla la extracción estructurada
         es_domicilio = any(p in confirmacion_bot.lower() for p in ["camino", "domicilio a", "a la dirección"])
@@ -316,6 +321,11 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
         m = re.search(r"Total:?\s*\$?\s?([\d.,]+)", resumen, re.IGNORECASE)
         if m:
             total = int(m.group(1).replace(".", "").replace(",", ""))
+        metodo_pago = None
+
+    # El pago en efectivo (o sin especificar) no requiere confirmación;
+    # Nequi y Bre-B quedan pendientes hasta que el restaurante confirme que llegó la plata.
+    pago_confirmado = metodo_pago not in ("nequi", "bre_b")
 
     ahora = datetime.now(ZONA_HORARIA)
 
@@ -332,6 +342,8 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
             "tipo": tipo,
             "direccion": direccion,
             "estado": "activo",
+            "metodo_pago": metodo_pago,
+            "pago_confirmado": pago_confirmado,
             "hora": ahora.strftime("%I:%M %p"),
             "fecha": ahora.isoformat(),
         }).eq("id", pedido_id).execute()
@@ -350,6 +362,8 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
         "estado": "activo",
         "modificaciones": [],
         "quejas": [],
+        "metodo_pago": metodo_pago,
+        "pago_confirmado": pago_confirmado,
         "hora": ahora.strftime("%I:%M %p"),
         "fecha": ahora.isoformat(),
     }
@@ -458,6 +472,19 @@ def formato_horario(r):
             partes.append(f"{abrev} Cerrado")
     return ", ".join(partes)
 
+def metodos_pago_texto(r):
+    """Arma el texto de métodos de pago disponibles para ESTE restaurante,
+    a partir de los campos opcionales nequi_numero / llave_bre_b que haya
+    configurado en el panel admin. Efectivo siempre está disponible."""
+    partes = ["Efectivo"]
+    nequi = (r.get("nequi_numero") or "").strip() if r else ""
+    if nequi:
+        partes.append(f"Nequi ({nequi})")
+    bre_b = (r.get("llave_bre_b") or "").strip() if r else ""
+    if bre_b:
+        partes.append(f"Bre-B / llave ({bre_b})")
+    return ", ".join(partes)
+
 def lista_restaurantes():
     lineas = ["🍽️ *Bienvenido a Ipiales Delivery*\n\nElige un restaurante:\n"]
     for i, (key, r) in enumerate(_cache_restaurantes.items(), 1):
@@ -506,10 +533,12 @@ def build_system_prompt(rest_key, cliente=None):
         'Si dice que no, respeta su decisión y no insistas de nuevo con eso.'
     ) if hay_bebidas else ""
 
+    metodos_pago = metodos_pago_texto(r)
+
     return f"""Eres el asistente virtual de *{r['nombre']}*, en {r['direccion']}, Ipiales.
 HORARIO: {formato_horario(r)}
 DOMICILIO: {dom}
-MÉTODOS DE PAGO: Nequi, Daviplata, transferencia, efectivo.
+MÉTODOS DE PAGO: {metodos_pago}.
 MENÚ:
 {chr(10).join(menu_activo)}
 {notas}{espera}{saludo}
@@ -527,7 +556,10 @@ INSTRUCCIONES:
 - Si el cliente mencionó lugar de entrega, es domicilio. Confirma la dirección.
 - Si el pedido es a domicilio y NO tienes clara la dirección, dile textualmente algo como: "Para el domicilio, escríbeme tu dirección completa (barrio, calle/carrera y número), o si prefieres, envíame tu ubicación actual desde WhatsApp (toca el clip 📎 → Ubicación)." No cierres el pedido a domicilio sin dirección confirmada por ninguna de esas dos vías.
 - En el resumen final de un pedido a domicilio SIEMPRE detalla los datos de entrega: dirección exacta (o la ubicación que envió) y el nombre de quien recibe.
-- Al confirmar el pedido SIEMPRE termina con esta frase EXACTA en una línea separada: "✅ Pedido recibido. Estamos preparando tu pedido 🍔"
+- Antes de mostrar el resumen final, pregúntale al cliente cómo va a pagar (elige una de las opciones en MÉTODOS DE PAGO de arriba). Si elige Nequi o Bre-B, dale el número EXACTO que aparece en MÉTODOS DE PAGO y pídele que envíe la foto del comprobante de la transferencia aquí por WhatsApp. Incluye el método de pago elegido en el resumen final.
+- Al confirmar el pedido SIEMPRE termina con una frase EXACTA en una línea separada, según el método de pago elegido:
+  - Si paga en EFECTIVO: "✅ Pedido recibido. Estamos preparando tu pedido 🍔"
+  - Si paga por NEQUI o BRE-B: "✅ Pedido recibido. Apenas confirmes tu pago (envía la captura aquí) el restaurante lo revisará y ahí sí empezaremos a preparar tu pedido 🍔"
 - NUNCA uses frases como "en camino", "listo para recoger", "pasamos a preparar" — eso lo decide el restaurante, no tú.
 - Esta frase de confirmación es OBLIGATORIA cada vez que el cliente confirme un pedido.
 - No inventes productos ni precios.
@@ -579,7 +611,7 @@ def enviar_menu_texto(numero, rest_key):
             lineas.append(f"- {nota}")
     dom = "Sí, costo $3.000" if extra.get("domicilio_activo", True) else "No disponible"
     lineas.append(f"\n🛵 *Domicilio:* {dom}")
-    lineas.append("💳 *Pago:* Nequi, Daviplata, transferencia, efectivo")
+    lineas.append(f"💳 *Pago:* {metodos_pago_texto(r)}")
     enviar_whatsapp(numero, "\n\n".join(lineas))
 
 def enviar_menu_segun_modo(numero, rest_key):
@@ -1370,6 +1402,11 @@ def _aplicar_cambio_estado_pedido(pedido, nuevo):
         if orden.index(nuevo) < orden.index(anterior):
             return {"ok": False, "msg": f"No se puede volver de '{anterior}' a '{nuevo}'."}
 
+    # Si el pago es por Nequi/Bre-B y aún no se confirmó que llegó, no se puede
+    # avanzar el pedido (evita que el restaurante empiece a cocinar sin cobrar).
+    if nuevo != "cancelado" and pedido.get("metodo_pago") in ("nequi", "bre_b") and not pedido.get("pago_confirmado"):
+        return {"ok": False, "msg": "Primero debes confirmar que el pago por transferencia llegó."}
+
     actualizar_estado_pedido(pedido_id, nuevo)
     numero = pedido["numero_cliente"]
     nombre_rest = pedido.get("restaurante_nombre", "")
@@ -1518,6 +1555,23 @@ async def api_restaurante_panel_cambiar_estado(pedido_id: str, request: Request)
     if not pedido or pedido.get("restaurante_id") != rest_key:
         raise HTTPException(status_code=404)
     return _aplicar_cambio_estado_pedido(pedido, nuevo)
+
+@app.post("/api/restaurante-panel/pedidos/{pedido_id}/confirmar-pago")
+async def api_restaurante_panel_confirmar_pago(pedido_id: str, request: Request):
+    rest_key = verificar_token_restaurante(request.cookies.get("rest_session", ""))
+    if not rest_key:
+        raise HTTPException(status_code=403)
+    pedido = get_pedido_by_id(pedido_id)
+    if not pedido or pedido.get("restaurante_id") != rest_key:
+        raise HTTPException(status_code=404)
+    if pedido.get("estado") in ("entregado", "cancelado"):
+        return {"ok": False, "msg": f"Este pedido ya fue {pedido['estado']} y no se puede modificar."}
+    try:
+        supabase.table("pedidos").update({"pago_confirmado": True}).eq("id", pedido_id).execute()
+        enviar_whatsapp(pedido["numero_cliente"], f"✅ *¡Pago confirmado!* Ya estamos preparando tu pedido #{pedido_id} 🍔")
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "msg": str(e)}
 
 @app.post("/api/restaurante-panel/pedidos/{pedido_id}/buscar-domiciliario")
 async def api_restaurante_panel_buscar_domiciliario(pedido_id: str, request: Request):
@@ -2363,6 +2417,8 @@ async def admin_crear_restaurante(request: Request):
             "categoria": body.get("categoria", ""),
             "descripcion": body.get("descripcion", ""),
             "logo_url": body.get("logo_url", ""),
+            "nequi_numero": body.get("nequi_numero", ""),
+            "llave_bre_b": body.get("llave_bre_b", ""),
         }
         supabase.table("restaurantes").insert(r).execute()
         cargar_restaurantes()
