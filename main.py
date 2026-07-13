@@ -1175,91 +1175,239 @@ document.getElementById('form-login').onsubmit = async function(e) {
 
 PANEL_HTML = """<!DOCTYPE html>
 <html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Panel — Ipiales Delivery</title>
+<title>Panel general — Caza Delivery</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Segoe UI',sans-serif;background:#f5f5f0;color:#222;padding:16px;min-height:100vh}
-.container{max-width:1200px;margin:0 auto}
-header{background:linear-gradient(135deg,#FFC107,#F57C00);border-radius:14px;padding:16px 20px;margin-bottom:18px;box-shadow:0 4px 16px rgba(245,124,0,.25)}
-h1{font-size:1.3rem;color:#222}h1 span{display:block;font-size:.75rem;font-weight:400;color:rgba(34,32,24,.7);margin-top:2px}
-.header-top{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}
-.btns{display:flex;gap:8px}
-.btn{padding:9px 16px;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.83rem}
-.btn-dark{background:#222;color:#fff}.btn-dark:hover{background:#333}
-.btn-out{background:rgba(34,32,24,.8);color:#fff}.btn-out:hover{background:#222}
-.stats{display:flex;gap:16px;margin-top:10px;font-size:.8rem;color:rgba(34,32,24,.7);font-weight:600;flex-wrap:wrap}
-.cards-resumen{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0}
-.card-r{background:#fff;border-radius:10px;padding:12px 14px;text-align:center;border:1px solid #FFE2A8}
-.card-r .num{display:block;font-size:1.5rem;font-weight:700;color:#222}
-.card-r .lbl{display:block;font-size:.72rem;color:#888;margin-top:3px}
-.card-r.total{background:#222;border-color:#222}.card-r.total .num{color:#FFC107;font-size:1.7rem}.card-r.total .lbl{color:rgba(255,255,255,.6)}
-.card-r.cancel .num{color:#d32f2f}
-.tabs{display:flex;gap:8px;margin:14px 0;flex-wrap:wrap}
-.tab{background:#fff;color:#888;border:1px solid #FFE2A8;padding:8px 14px;border-radius:20px;cursor:pointer;font-size:.83rem;font-weight:700;transition:all .15s}
-.tab:hover{border-color:#FFA000;color:#222}
-.tab.on{background:linear-gradient(135deg,#FFC107,#F57C00);color:#222;border-color:#F57C00}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
-.card{background:#fff;border-left:4px solid #F57C00;border-radius:10px;padding:14px;box-shadow:0 2px 8px rgba(0,0,0,.07)}
-.pid{font-size:1.1rem;font-weight:700;color:#F57C00}
-.rest-tag{display:inline-block;background:#FFF3D6;color:#E65100;padding:2px 8px;border-radius:4px;font-size:.72rem;font-weight:700;margin:4px 0 2px}
-.hora{font-size:.78rem;color:#888}
-.tipo-tag{display:inline-block;background:#FFC107;color:#222;padding:3px 8px;border-radius:4px;font-size:.73rem;font-weight:700;margin-top:6px}
-.cli{font-size:.83rem;color:#555;margin:6px 0 2px}
-.cli-nombre{font-size:.83rem;color:#E65100;font-weight:700;margin:2px 0}
-.dir{font-size:.78rem;color:#888;margin-bottom:6px;word-break:break-word}
-.resumen{background:#FFFBF2;padding:8px;border-radius:6px;font-size:.76rem;color:#444;max-height:100px;overflow-y:auto;border-left:3px solid #FFC107;white-space:pre-wrap;margin:6px 0}
-.mods{background:#FFF6E0;border-left:3px solid #FF9800;padding:7px;border-radius:6px;margin:6px 0;font-size:.73rem}
-.quejas-box{background:#FDECEA;border-left:3px solid #f44336;padding:7px;border-radius:6px;margin:6px 0;font-size:.73rem}
-.est-lbl{text-align:center;font-size:.78rem;font-weight:700;padding:4px;border-radius:4px;margin:8px 0 5px}
-.est-lbl.activo{color:#2E7D32}.est-lbl.preparando{color:#1565C0}.est-lbl.enviado{color:#1565C0}.est-lbl.entregado{color:#6A1B9A}.est-lbl.cancelado{color:#C62828}
-.ebts{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
-.btn-buscar-dom{width:100%;padding:11px;border:none;border-radius:8px;background:linear-gradient(135deg,#FFC107,#F57C00);color:#222;font-weight:700;font-size:.85rem;cursor:pointer;margin:8px 0}
-.btn-buscar-dom:hover{filter:brightness(1.05)}
+:root{
+  --bg:#fafafa;--surface:#ffffff;--surface2:#f5f5f5;--border:#efefef;--border2:#f5f5f5;
+  --text:#2a2a2a;--text2:#666666;--text3:#999999;
+  --accent1:#667eea;--accent2:#764ba2;--accent-shadow:rgba(102,126,234,.25);--accent-ring:rgba(102,126,234,.1);
+  --red:#d32f2f;--red-light:#ffebee;--red-dark:#c62828;
+  --green:#2e7d32;--green-light:#e8f5e9;
+  --blue:#1565c0;--blue-light:#e3f2fd;
+  --purple:#6a1b9a;--purple-light:#f3e5f5;
+  --yellow:#e65100;--yellow-light:#fff3e0;
+  --shadow-sm:0 1px 3px rgba(0,0,0,.04);
+  --shadow-md:0 4px 12px rgba(0,0,0,.08);
+}
+:root[data-theme="dark"]{
+  --bg:#12151a;--surface:#1a1e24;--surface2:#20252c;--border:#2a2f37;--border2:#262b32;
+  --text:#e8e8e8;--text2:#a8adb5;--text3:#7a8088;
+  --red:#f28b8b;--red-light:rgba(211,47,47,.18);--red-dark:#ff8a80;
+  --green:#66bb6a;--green-light:rgba(46,125,50,.2);
+  --blue:#64b5f6;--blue-light:rgba(21,101,192,.22);
+  --purple:#ba68c8;--purple-light:rgba(106,27,154,.22);
+  --yellow:#ffb74d;--yellow-light:rgba(230,81,0,.18);
+  --shadow-sm:0 1px 3px rgba(0,0,0,.3);--shadow-md:0 4px 12px rgba(0,0,0,.45);
+}
+@media(prefers-color-scheme:dark){
+  :root:not([data-theme="light"]):not([data-theme="dark"]){
+    --bg:#12151a;--surface:#1a1e24;--surface2:#20252c;--border:#2a2f37;--border2:#262b32;
+    --text:#e8e8e8;--text2:#a8adb5;--text3:#7a8088;
+    --red:#f28b8b;--red-light:rgba(211,47,47,.18);--red-dark:#ff8a80;
+    --green:#66bb6a;--green-light:rgba(46,125,50,.2);
+    --blue:#64b5f6;--blue-light:rgba(21,101,192,.22);
+    --purple:#ba68c8;--purple-light:rgba(106,27,154,.22);
+    --yellow:#ffb74d;--yellow-light:rgba(230,81,0,.18);
+    --shadow-sm:0 1px 3px rgba(0,0,0,.3);--shadow-md:0 4px 12px rgba(0,0,0,.45);
+  }
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;transition:background .2s ease,color .2s ease}
+.layout{display:flex;min-height:100vh}
+.sidebar{width:230px;background:var(--surface);border-right:1px solid var(--border);padding:22px 0;position:fixed;top:0;left:0;height:100vh;display:flex;flex-direction:column;z-index:100;box-shadow:var(--shadow-sm)}
+.sidebar-logo{padding:0 22px 20px;border-bottom:1px solid var(--border2);margin-bottom:14px}
+.sidebar-logo h1{font-size:1.1rem;color:var(--accent1);font-weight:700;letter-spacing:-.3px}
+.sidebar-logo p{font-size:.72rem;color:var(--text3);margin-top:3px}
+.nav-item{display:flex;align-items:center;gap:11px;padding:12px 22px;cursor:pointer;color:var(--text2);font-size:.88rem;font-weight:500;transition:all .18s ease;border-left:3px solid transparent}
+.nav-item:hover{background:var(--surface2);color:var(--text)}
+.nav-item.active{background:rgba(102,126,234,.1);color:var(--accent1);border-left-color:var(--accent1)}
+.nav-item .icon{font-size:1.1rem;width:20px;text-align:center}
+.sidebar-footer{padding:16px 20px;border-top:1px solid var(--border2);display:flex;flex-direction:column;gap:10px;margin-top:auto}
+.theme-toggle{display:flex;align-items:center;gap:8px;width:100%;padding:9px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text2);font-size:.78rem;font-weight:600;cursor:pointer}
+.theme-toggle:hover{color:var(--text);border-color:var(--accent1)}
+.main{margin-left:230px;padding:28px;flex:1}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px}
+.topbar h2{font-size:1.3rem;font-weight:700}
+.btn{padding:9px 16px;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-size:.82rem;display:inline-flex;align-items:center;gap:6px}
+.btn-primary{background:linear-gradient(135deg,var(--accent1) 0%,var(--accent2) 100%);color:#fff}
+.btn-primary:hover{filter:brightness(1.08)}
+.btn-ghost{background:var(--surface2);color:var(--text2);border:1px solid var(--border)}
+.btn-ghost:hover{color:var(--text);border-color:var(--accent1)}
+.stats{display:flex;gap:20px;margin-bottom:20px;font-size:.82rem;color:var(--text2);font-weight:600;flex-wrap:wrap}
+.cards-resumen{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:20px}
+.card-r{background:var(--surface);border-radius:12px;padding:16px;text-align:center;border:1px solid var(--border2);box-shadow:var(--shadow-sm)}
+.card-r .num{display:block;font-size:1.6rem;font-weight:700;color:var(--text)}
+.card-r .lbl{display:block;font-size:.72rem;color:var(--text3);margin-top:4px}
+.card-r.total .num{background:linear-gradient(135deg,var(--accent1) 0%,var(--accent2) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;font-size:1.7rem}
+.card-r.cancel .num{color:var(--red)}
+.tabs{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;border-bottom:1px solid var(--border2)}
+.tab{background:none;color:var(--text3);border:none;border-bottom:2px solid transparent;padding:10px 4px;margin-right:16px;cursor:pointer;font-size:.85rem;font-weight:600;transition:all .15s}
+.tab:hover{color:var(--text)}
+.tab.on{color:var(--accent1);border-bottom-color:var(--accent1)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.card{background:var(--surface);border:1px solid var(--border2);border-left:3px solid var(--accent1);border-radius:12px;padding:16px;box-shadow:var(--shadow-sm)}
+.pid{font-size:1.05rem;font-weight:700;color:var(--accent1)}
+.rest-tag{display:inline-block;background:var(--yellow-light);color:var(--yellow);padding:3px 9px;border-radius:6px;font-size:.72rem;font-weight:700;margin:6px 0 2px}
+.hora{font-size:.78rem;color:var(--text3)}
+.tipo-tag{display:inline-block;background:var(--surface2);color:var(--text);border:1px solid var(--border);padding:3px 9px;border-radius:6px;font-size:.72rem;font-weight:700;margin-top:6px}
+.cli{font-size:.83rem;color:var(--text2);margin:8px 0 2px}
+.cli-nombre{font-size:.83rem;color:var(--accent1);font-weight:700;margin:2px 0}
+.dir{font-size:.78rem;color:var(--text3);margin-bottom:6px;word-break:break-word}
+.resumen{background:var(--bg);padding:10px;border-radius:8px;font-size:.76rem;color:var(--text2);max-height:100px;overflow-y:auto;border-left:3px solid var(--accent1);white-space:pre-wrap;margin:8px 0}
+.mods{background:var(--surface2);border-left:3px solid var(--accent1);padding:8px;border-radius:8px;margin:8px 0;font-size:.73rem;color:var(--text2)}
+.quejas-box{background:var(--red-light);border-left:3px solid var(--red);padding:8px;border-radius:8px;margin:8px 0;font-size:.73rem;color:var(--red-dark)}
+.est-lbl{text-align:center;font-size:.78rem;font-weight:700;padding:6px;border-radius:6px;margin:10px 0 6px;background:var(--surface2);color:var(--text2)}
+.est-lbl.activo{background:var(--blue-light);color:var(--blue)}.est-lbl.preparando{color:var(--accent1)}
+.est-lbl.enviado{background:var(--blue-light);color:var(--blue)}.est-lbl.entregado{background:var(--purple-light);color:var(--purple)}
+.est-lbl.cancelado{background:var(--red-light);color:var(--red-dark)}
+.ebts{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.btn-buscar-dom{width:100%;padding:12px;border:none;border-radius:8px;background:linear-gradient(135deg,var(--accent1) 0%,var(--accent2) 100%);color:#fff;font-weight:700;font-size:.85rem;cursor:pointer;margin:8px 0}
+.btn-buscar-dom:hover{filter:brightness(1.08)}
 .btn-buscar-dom:disabled{opacity:.6;cursor:default}
-.dom-buscando{width:100%;padding:11px;border-radius:8px;background:#3a3a2a;color:#FFC107;font-weight:700;font-size:.85rem;text-align:center;margin:8px 0}
-.dom-asignado{width:100%;padding:11px;border-radius:8px;background:#1b3a1b;color:#4CAF50;font-weight:700;font-size:.85rem;text-align:center;margin:8px 0}
-.eb{padding:8px 0;border:none;border-radius:6px;cursor:pointer;font-size:.95rem;background:#f5f5f0;color:#aaa;opacity:.65;transition:all .15s}
-.eb:hover{opacity:1}.eb.on{opacity:1}
-.eb-activo.on{background:#4CAF50;color:#fff}.eb-preparando.on{background:#FF9800;color:#fff}
-.eb-enviado.on{background:#2196F3;color:#fff}.eb-entregado.on{background:#9C27B0;color:#fff}.eb-cancelado.on{background:#f44336;color:#fff}
-.empty{text-align:center;padding:50px 20px;color:#888;font-size:.95rem}
+.dom-buscando{width:100%;padding:11px;border-radius:8px;background:var(--surface2);color:var(--accent1);border:1px solid var(--border);font-weight:700;font-size:.85rem;text-align:center;margin:8px 0}
+.dom-asignado{width:100%;padding:11px;border-radius:8px;background:var(--green-light);color:var(--green);font-weight:700;font-size:.85rem;text-align:center;margin:8px 0}
+.eb{padding:9px 0;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:.85rem;font-weight:700;background:var(--bg);color:var(--text3);opacity:.7;transition:all .15s}
+.eb:hover{opacity:1}.eb.on{opacity:1;border-color:transparent}
+.eb-activo.on{background:var(--green);color:#fff}.eb-preparando.on{background:var(--accent1);color:#fff}
+.eb-enviado.on{background:var(--blue);color:#fff}.eb-entregado.on{background:var(--purple);color:#fff}.eb-cancelado.on{background:var(--red);color:#fff}
+.empty{text-align:center;padding:50px 20px;color:var(--text3);font-size:.9rem;background:var(--surface);border:1px solid var(--border2);border-radius:12px}
+.rev-rest{background:var(--surface);border:1px solid var(--border2);border-radius:12px;padding:18px;margin-bottom:16px;box-shadow:var(--shadow-sm)}
+.rev-rest-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border2)}
+.rev-rest-header h3{font-size:1rem;font-weight:700}
+.rev-prom{font-size:1.1rem;font-weight:700;color:var(--yellow)}
+.rev-item{padding:10px 0;border-bottom:1px solid var(--border2);font-size:.82rem}
+.rev-item:last-child{border-bottom:none}
+.rev-stars{color:var(--yellow);font-weight:700;margin-bottom:4px}
+.rev-comment{color:var(--text2)}
+.rev-meta{color:var(--text3);font-size:.72rem;margin-top:4px}
+.rev-item-alert{border-left:3px solid var(--red);padding-left:10px;background:var(--red-light);border-radius:0 8px 8px 0}
+.nav-badge{background:var(--red);color:#fff;font-size:.68rem;font-weight:700;padding:1px 6px;border-radius:10px;margin-left:auto}
+.filtro-rest{padding:9px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:.82rem;font-family:inherit}
+.chart-bars{display:flex;align-items:flex-end;gap:9px;height:180px;margin-top:14px;padding:16px;background:var(--surface);border:1px solid var(--border2);border-radius:12px;box-shadow:var(--shadow-sm)}
+.bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;justify-content:flex-end;height:100%}
+.bar{width:100%;background:linear-gradient(to top,var(--accent1),var(--accent2));border-radius:5px 5px 0 0;min-height:4px}
+.bar-lbl{font-size:.68rem;color:var(--text2);text-align:center;font-weight:500;max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar-val{font-size:.72rem;color:var(--accent1);font-weight:700}
+@media(max-width:768px){
+  .sidebar{position:static;width:100%;height:auto;flex-direction:row;align-items:center;padding:10px;overflow-x:auto}
+  .sidebar-logo,.sidebar-footer{display:none}
+  .sidebar nav{display:flex;flex-direction:row;gap:4px}
+  .nav-item{flex-direction:column;gap:3px;padding:8px 12px;border-left:none;border-bottom:3px solid transparent;white-space:nowrap;font-size:.7rem}
+  .nav-item.active{border-left-color:transparent;border-bottom-color:var(--accent1)}
+  .main{margin-left:0;padding:16px}
+}
 </style></head><body>
-<div class="container">
-<header>
-  <div class="header-top">
-    <h1>🍽️ Ipiales Delivery<span>Panel de Pedidos</span></h1>
-    <div class="btns">
-      <button class="btn btn-dark" onclick="cargarPedidos()">🔄 Actualizar</button>
-      <button class="btn btn-out" onclick="window.location.href='/panel'">Salir</button>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-logo"><h1>Panel general</h1><p>Caza Delivery</p></div>
+    <nav>
+      <div class="nav-item active" id="nav-dashboard" onclick="mostrarVista('dashboard')"><span class="icon">▭</span> Dashboard</div>
+      <div class="nav-item" id="nav-pedidos" onclick="mostrarVista('pedidos')"><span class="icon">☰</span> Pedidos</div>
+      <div class="nav-item" id="nav-resenas" onclick="mostrarVista('resenas')"><span class="icon">★</span> Reseñas <span id="badge-resenas-bajas" class="nav-badge" style="display:none"></span></div>
+      <div class="nav-item" id="nav-analitica" onclick="mostrarVista('analitica')"><span class="icon">▢</span> Analítica</div>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle-btn"><span id="theme-toggle-icon">☾</span> <span id="theme-toggle-label">Modo oscuro</span></button>
+      <a href="/" style="color:var(--text3);font-size:.78rem;text-decoration:none">↗ Ver página pública</a>
+      <a href="#" onclick="window.location.href='/panel';return false;" style="color:var(--text3);font-size:.78rem;text-decoration:none">⊗ Salir</a>
     </div>
-  </div>
-  <div class="stats">
-    <span id="s-hora">🕐 --:--</span>
-    <span id="s-total">📊 Total: 0</span>
-    <span id="s-activos">⚡ Activos: 0</span>
-  </div>
-</header>
-<div class="cards-resumen">
-  <div class="card-r"><span class="num" id="v-cant">0</span><span class="lbl">📦 Pedidos hoy</span></div>
-  <div class="card-r total"><span class="num" id="v-total">$0</span><span class="lbl">💰 Total vendido hoy</span></div>
-  <div class="card-r cancel"><span class="num" id="v-cancel">0</span><span class="lbl">❌ Cancelados hoy</span></div>
-</div>
-<div class="tabs">
-  <button class="tab on" data-tab="todos" onclick="cambiarTab('todos')">📋 Todos <span id="c-todos"></span></button>
-  <button class="tab" data-tab="preparacion" onclick="cambiarTab('preparacion')">📥 Recibidos <span id="c-prep"></span></button>
-  <button class="tab" data-tab="enviados" onclick="cambiarTab('enviados')">🛵 Enviados <span id="c-env"></span></button>
-  <button class="tab" data-tab="entregados" onclick="cambiarTab('entregados')">✅ Entregados <span id="c-ent"></span></button>
-</div>
-<div id="grid" class="grid"></div>
-<div id="empty" class="empty" style="display:none">No hay pedidos en esta pestaña 😊</div>
-<div style="text-align:center;margin-top:24px">
-  <a href="/" style="color:#9a8a6b;font-size:.8rem;text-decoration:none">🌐 Ver página de información de CaZa Delivery</a>
-</div>
+  </aside>
+  <main class="main">
+    <div id="view-dashboard">
+      <div class="topbar"><h2>Dashboard</h2><button class="btn btn-primary" onclick="cargarPedidos()">↻ Actualizar</button></div>
+      <div class="stats"><span id="s-hora">--:--</span><span id="s-total">Total: 0</span><span id="s-activos">Activos: 0</span></div>
+      <div class="cards-resumen">
+        <div class="card-r"><span class="num" id="v-cant">0</span><span class="lbl">Pedidos hoy</span></div>
+        <div class="card-r total"><span class="num" id="v-total">$0</span><span class="lbl">Total vendido hoy</span></div>
+        <div class="card-r cancel"><span class="num" id="v-cancel">0</span><span class="lbl">Cancelados hoy</span></div>
+      </div>
+    </div>
+    <div id="view-pedidos" style="display:none">
+      <div class="topbar">
+        <h2>Pedidos</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select class="filtro-rest" id="filtro-rest-pedidos" onchange="cambiarFiltroRestaurante(this.value)"><option value="">Todos los restaurantes</option></select>
+          <button class="btn btn-primary" onclick="cargarPedidos()">↻ Actualizar</button>
+        </div>
+      </div>
+      <div class="tabs">
+        <button class="tab on" data-tab="todos" onclick="cambiarTab('todos')">Todos <span id="c-todos"></span></button>
+        <button class="tab" data-tab="preparacion" onclick="cambiarTab('preparacion')">Recibidos <span id="c-prep"></span></button>
+        <button class="tab" data-tab="enviados" onclick="cambiarTab('enviados')">Enviados <span id="c-env"></span></button>
+        <button class="tab" data-tab="entregados" onclick="cambiarTab('entregados')">Entregados <span id="c-ent"></span></button>
+      </div>
+      <div id="grid" class="grid"></div>
+      <div id="empty" class="empty" style="display:none">No hay pedidos en esta pestaña</div>
+    </div>
+    <div id="view-resenas" style="display:none">
+      <div class="topbar">
+        <h2>Reseñas</h2>
+        <select class="filtro-rest" id="filtro-rest-resenas" onchange="cambiarFiltroRestaurante(this.value)"><option value="">Todos los restaurantes</option></select>
+      </div>
+      <div id="resenas-lista"></div>
+    </div>
+    <div id="view-analitica" style="display:none">
+      <div class="topbar"><h2>Analítica</h2></div>
+      <div class="cards-resumen" id="analitica-resumen"></div>
+      <h3 style="font-size:.9rem;color:var(--text2);margin:20px 0 6px">Ventas de hoy por restaurante</h3>
+      <div class="chart-bars" id="chart-rest"></div>
+    </div>
+  </main>
 </div>
 <script>
 const pw="{{PW}}";
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-let todos=[],tabActual="todos";
+let todos=[],tabActual="todos",restauranteFiltro="";
+
+// ── TEMA CLARO / OSCURO ──
+function aplicarTema(tema){
+  document.documentElement.setAttribute("data-theme",tema);
+  document.getElementById("theme-toggle-icon").textContent=tema==="dark"?"☀":"☾";
+  document.getElementById("theme-toggle-label").textContent=tema==="dark"?"Modo claro":"Modo oscuro";
+}
+function toggleTheme(){
+  const actual=document.documentElement.getAttribute("data-theme");
+  const nuevo=actual==="dark"?"light":"dark";
+  localStorage.setItem("panel-general-theme",nuevo);
+  aplicarTema(nuevo);
+}
+(function initTema(){
+  const guardado=localStorage.getItem("panel-general-theme");
+  const tema=guardado||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
+  aplicarTema(tema);
+})();
+
+// ── NAVEGACIÓN ──
+let vistaActual="dashboard";
+function mostrarVista(vista){
+  document.getElementById(`view-${vistaActual}`).style.display="none";
+  document.getElementById(`nav-${vistaActual}`).classList.remove("active");
+  vistaActual=vista;
+  document.getElementById(`view-${vista}`).style.display="block";
+  document.getElementById(`nav-${vista}`).classList.add("active");
+  if(vista==="resenas") renderResenas();
+  if(vista==="analitica") renderAnalitica();
+}
+
+function cambiarFiltroRestaurante(valor){
+  restauranteFiltro=valor;
+  document.getElementById('filtro-rest-pedidos').value=valor;
+  document.getElementById('filtro-rest-resenas').value=valor;
+  render();
+  renderResenas();
+}
+
+function actualizarSelectRestaurantes(){
+  const nombres=[...new Set(todos.map(p=>p.restaurante_nombre).filter(Boolean))].sort();
+  const opciones='<option value="">Todos los restaurantes</option>'+nombres.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  ['filtro-rest-pedidos','filtro-rest-resenas'].forEach(id=>{
+    const sel=document.getElementById(id);
+    const actual=sel.value;
+    sel.innerHTML=opciones;
+    sel.value=actual;
+  });
+}
+
 async function cargarPedidos(){
   try{
     const r=await fetch(`/api/pedidos?pw=${encodeURIComponent(pw)}`);
@@ -1267,8 +1415,18 @@ async function cargarPedidos(){
     const d=await r.json();
     todos=d.pedidos;
     await cargarEstadosDom(todos);
+    actualizarSelectRestaurantes();
+    actualizarBadgeResenasBajas();
     render();stats();contadores();ventasHoy();
+    if(vistaActual==="resenas") renderResenas();
+    if(vistaActual==="analitica") renderAnalitica();
   }catch(e){console.error(e);}
+}
+function actualizarBadgeResenasBajas(){
+  const bajas=todos.filter(p=>p.calificacion&&p.calificacion<=2).length;
+  const badge=document.getElementById('badge-resenas-bajas');
+  if(bajas>0){badge.textContent=bajas;badge.style.display='inline-block';}
+  else{badge.style.display='none';}
 }
 function esHoy(iso){
   try{
@@ -1288,10 +1446,10 @@ function ventasHoy(){
 }
 function stats(){
   const ahora=new Date().toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
-  document.getElementById('s-hora').textContent=`🕐 ${ahora}`;
-  document.getElementById('s-total').textContent=`📊 Total: ${todos.length}`;
+  document.getElementById('s-hora').textContent=ahora;
+  document.getElementById('s-total').textContent=`Total: ${todos.length}`;
   const act=todos.filter(p=>p.estado==='activo'||p.estado==='preparando').length;
-  document.getElementById('s-activos').textContent=`⚡ Activos: ${act}`;
+  document.getElementById('s-activos').textContent=`Activos: ${act}`;
 }
 function contadores(){
   document.getElementById('c-todos').textContent=`(${todos.length})`;
@@ -1300,10 +1458,12 @@ function contadores(){
   document.getElementById('c-ent').textContent=`(${todos.filter(p=>p.estado==='entregado').length})`;
 }
 function filtrar(tab){
-  if(tab==='preparacion')return todos.filter(p=>p.estado==='activo'||p.estado==='preparando');
-  if(tab==='enviados')return todos.filter(p=>p.estado==='enviado');
-  if(tab==='entregados')return todos.filter(p=>p.estado==='entregado');
-  return todos;
+  let base=todos;
+  if(restauranteFiltro) base=base.filter(p=>p.restaurante_nombre===restauranteFiltro);
+  if(tab==='preparacion')return base.filter(p=>p.estado==='activo'||p.estado==='preparando');
+  if(tab==='enviados')return base.filter(p=>p.estado==='enviado');
+  if(tab==='entregados')return base.filter(p=>p.estado==='entregado');
+  return base;
 }
 function cambiarTab(tab){
   tabActual=tab;
@@ -1311,10 +1471,10 @@ function cambiarTab(tab){
   document.querySelector(`.tab[data-tab="${tab}"]`).classList.add('on');
   render();
 }
-const EST_MAP={activo:'🆕 Activo',preparando:'📥 Pedido Recibido',enviado:'🛵 Enviado',entregado:'✅ Entregado',cancelado:'❌ Cancelado'};
+const EST_MAP={activo:'Activo',preparando:'Pedido recibido',enviado:'Enviado',entregado:'Entregado',cancelado:'Cancelado'};
 const BTNS=[
-  {k:'activo',i:'🆕',c:'eb-activo'},{k:'preparando',i:'📥',c:'eb-preparando'},
-  {k:'enviado',i:'🛵',c:'eb-enviado'},{k:'entregado',i:'✅',c:'eb-entregado'},{k:'cancelado',i:'❌',c:'eb-cancelado'}
+  {k:'activo',i:'●',c:'eb-activo'},{k:'preparando',i:'◐',c:'eb-preparando'},
+  {k:'enviado',i:'▶',c:'eb-enviado'},{k:'entregado',i:'✓',c:'eb-entregado'},{k:'cancelado',i:'✕',c:'eb-cancelado'}
 ];
 let estadosDom = {}; // pedido_id -> {asignado, nombre, buscando}
 
@@ -1330,7 +1490,7 @@ async function cargarEstadosDom(pedidos) {
 
 async function buscarDomiciliario(id) {
   const btn = document.getElementById(`btn-dom-${id}`);
-  if (btn) { btn.disabled = true; btn.textContent = "🔍 Buscando..."; }
+  if (btn) { btn.disabled = true; btn.textContent = "Buscando..."; }
   try {
     const r = await fetch(`/api/pedidos/${id}/buscar-domiciliario`, {
       method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({pw})
@@ -1348,12 +1508,12 @@ function htmlBotonDom(p) {
   if (p.tipo !== 'domicilio') return '';
   const est = estadosDom[p.id] || {};
   if (est.asignado) {
-    return `<div class="dom-asignado">🛵 Asignado a ${esc(est.nombre || 'domiciliario')}</div>`;
+    return `<div class="dom-asignado">Asignado a ${esc(est.nombre || 'domiciliario')}</div>`;
   }
   if (est.buscando) {
-    return `<div class="dom-buscando">🔍 Buscando domiciliario...</div>`;
+    return `<div class="dom-buscando">Buscando domiciliario...</div>`;
   }
-  return `<button class="btn-buscar-dom" id="btn-dom-${p.id}" onclick="buscarDomiciliario('${p.id}')">🛵 Empezar a buscar domiciliario</button>`;
+  return `<button class="btn-buscar-dom" id="btn-dom-${p.id}" onclick="buscarDomiciliario('${p.id}')">Empezar a buscar domiciliario</button>`;
 }
 
 function render(){
@@ -1369,15 +1529,15 @@ function render(){
     return `
     <div class="card">
       <div class="pid">#${esc(p.id)}</div>
-      <div class="rest-tag">🍽️ ${esc(p.restaurante_nombre||'—')}</div>
-      <div class="hora">🕐 ${esc(p.hora||'')}</div>
-      <div class="tipo-tag">${p.tipo==='domicilio'?'🛵 Domicilio':'🏠 Recoger'}</div>
-      <div class="cli">📱 ${esc(p.numero_cliente)}</div>
-      ${p.cliente_nombre?`<div class="cli-nombre">👤 ${esc(p.cliente_nombre)}</div>`:''}
-      <div class="dir">📍 ${esc(p.direccion)}</div>
+      <div class="rest-tag">${esc(p.restaurante_nombre||'—')}</div>
+      <div class="hora">${esc(p.hora||'')}</div>
+      <div class="tipo-tag">${p.tipo==='domicilio'?'Domicilio':'Recoger'}</div>
+      <div class="cli">${esc(p.numero_cliente)}</div>
+      ${p.cliente_nombre?`<div class="cli-nombre">${esc(p.cliente_nombre)}</div>`:''}
+      <div class="dir">${esc(p.direccion)}</div>
       <div class="resumen">${esc(p.resumen||'')}</div>
-      ${p.modificaciones&&p.modificaciones.length?`<div class="mods"><strong>📝 Modificaciones:</strong><br>${p.modificaciones.map(esc).join('<br>')}</div>`:''}
-      ${p.quejas&&p.quejas.length?`<div class="quejas-box"><strong>⚠️ Quejas:</strong><br>${p.quejas.map(esc).join('<br>')}</div>`:''}
+      ${p.modificaciones&&p.modificaciones.length?`<div class="mods"><strong>Modificaciones:</strong><br>${p.modificaciones.map(esc).join('<br>')}</div>`:''}
+      ${p.quejas&&p.quejas.length?`<div class="quejas-box"><strong>Quejas:</strong><br>${p.quejas.map(esc).join('<br>')}</div>`:''}
       <div class="est-lbl ${p.estado}">${EST_MAP[p.estado]||p.estado}</div>
       ${!esFinal ? htmlBotonDom(p) : ''}
       <div class="ebts">${BTNS.map(b=>{
@@ -1386,7 +1546,7 @@ function render(){
         return `<button class="eb ${b.c} ${p.estado===b.k?'on':''}"
           title="${b.k}"
           ${bloqueado ? 'disabled style="opacity:.25;cursor:not-allowed"' : ''}
-          onclick="${bloqueado?'':''} cambiarEstado('${p.id}','${b.k}')">${b.i}</button>`;
+          onclick="cambiarEstado('${p.id}','${b.k}')">${b.i}</button>`;
       }).join('')}</div>
     </div>`;
   }).join('');
@@ -1395,6 +1555,62 @@ async function cambiarEstado(id,estado){
   await fetch(`/api/pedidos/${id}/estado`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pw,estado})});
   cargarPedidos();
 }
+
+// ── RESEÑAS (a partir de calificacion/comentario_calificacion que ya trae cada pedido) ──
+function renderResenas(){
+  const cont=document.getElementById('resenas-lista');
+  let conResena=todos.filter(p=>p.calificacion);
+  if(restauranteFiltro) conResena=conResena.filter(p=>p.restaurante_nombre===restauranteFiltro);
+  if(!conResena.length){cont.innerHTML='<div class="empty">Aún no hay reseñas de clientes</div>';return;}
+  const porRest={};
+  conResena.forEach(p=>{
+    const nombre=p.restaurante_nombre||'—';
+    (porRest[nombre]=porRest[nombre]||[]).push(p);
+  });
+  cont.innerHTML=Object.entries(porRest).map(([nombre,reseñas])=>{
+    const prom=(reseñas.reduce((a,p)=>a+p.calificacion,0)/reseñas.length).toFixed(1);
+    const items=reseñas.slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')).map(p=>`
+      <div class="rev-item ${p.calificacion<=2?'rev-item-alert':''}">
+        <div class="rev-stars">${'★'.repeat(p.calificacion)}${'☆'.repeat(5-p.calificacion)}</div>
+        ${p.comentario_calificacion?`<div class="rev-comment">${esc(p.comentario_calificacion)}</div>`:'<div class="rev-comment" style="color:var(--text3);font-style:italic">Sin comentario, solo calificó con estrellas</div>'}
+        <div class="rev-meta">${esc(p.cliente_nombre||'Cliente')} · pedido #${esc(p.id)}</div>
+      </div>
+    `).join('');
+    return `
+    <div class="rev-rest">
+      <div class="rev-rest-header"><h3>${esc(nombre)}</h3><span class="rev-prom">★ ${prom} (${reseñas.length})</span></div>
+      ${items}
+    </div>`;
+  }).join('');
+}
+
+function renderAnalitica(){
+  const hoy=todos.filter(p=>esHoy(p.fecha)&&p.estado!=='cancelado');
+  const porRest={};
+  hoy.forEach(p=>{
+    const nombre=p.restaurante_nombre||'—';
+    porRest[nombre]=(porRest[nombre]||0)+(p.total||0);
+  });
+  const entries=Object.entries(porRest).sort((a,b)=>b[1]-a[1]);
+  const totalHoy=entries.reduce((a,[,v])=>a+v,0);
+  const top=entries[0];
+  document.getElementById('analitica-resumen').innerHTML=`
+    <div class="card-r"><span class="num">${entries.length}</span><span class="lbl">Restaurantes con ventas hoy</span></div>
+    <div class="card-r total"><span class="num">$${Math.round(totalHoy).toLocaleString('es-CO')}</span><span class="lbl">Total vendido hoy</span></div>
+    <div class="card-r"><span class="num" style="font-size:1.1rem">${top?esc(top[0]):'—'}</span><span class="lbl">Restaurante top de hoy</span></div>
+  `;
+  const chart=document.getElementById('chart-rest');
+  if(!entries.length){chart.innerHTML='<p style="color:var(--text3);font-size:.85rem;margin:auto">Sin ventas registradas hoy todavía</p>';return;}
+  const max=Math.max(...entries.map(([,v])=>v),1);
+  chart.innerHTML=entries.map(([nombre,val])=>`
+    <div class="bar-wrap">
+      <div class="bar-val">$${Math.round(val).toLocaleString('es-CO')}</div>
+      <div class="bar" style="height:${Math.max((val/max)*100,4)}%"></div>
+      <div class="bar-lbl">${esc(nombre)}</div>
+    </div>
+  `).join('');
+}
+
 cargarPedidos();
 setInterval(cargarPedidos,6000);
 </script></body></html>"""
