@@ -183,8 +183,8 @@ Error generating stack: `+l.message+`
             .catch(function(){
               modal.innerHTML =
                 '<button class="cd-modal-close" id="cd-modal-close">×</button>' +
-                '<div class="cd-modal-body"><div class="cd-error">No se pudo cargar el menú justo ahora.</div>' +
-                '<a class="cd-btn-wa" style="display:block;text-align:center;text-decoration:none;box-sizing:border-box" href="' + hrefOriginal + '" target="_blank">Escribir por WhatsApp de todas formas</a></div>';
+                '<div class="cd-modal-body"><div class="cd-error">El menú no está disponible en este momento, pero puedes pedirlo directo por WhatsApp y te lo mandamos ahí 😊</div>' +
+                '<a class="cd-btn-wa" style="display:block;text-align:center;text-decoration:none;box-sizing:border-box" href="' + hrefOriginal + '" target="_blank">Escribir por WhatsApp</a></div>';
               document.getElementById('cd-modal-close').onclick = cerrarModal;
             });
         }
@@ -194,6 +194,9 @@ Error generating stack: `+l.message+`
         });
 
         document.addEventListener('click', function(e){
+          // Los links DENTRO de nuestro propio modal (ej. el botón de respaldo
+          // "Escribir por WhatsApp de todas formas") nunca deben re-interceptarse.
+          if(e.target.closest && e.target.closest('#cd-menu-overlay')) return;
           var link = e.target.closest && e.target.closest('a[href*="wa.me/"]');
           if(!link) return;
           var nombre = extraerNombreDeLink(link.href);
