@@ -63,6 +63,7 @@ cliente_restaurante     = {}
 clientes_eligiendo      = {}
 # registro en pasos: numero -> {"paso": "nombre"|"direccion"}
 clientes_registrando    = {}
+codigo_aplicado = {}  # numero -> fila de codigos_descuento ya validada para este pedido en curso
 
 INTERVALO_CORTO_MINUTOS = 15
 
@@ -328,6 +329,10 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
     # Nequi y Bre-B quedan pendientes hasta que el restaurante confirme que llegó la plata.
     pago_confirmado = metodo_pago not in ("nequi", "bre_b")
 
+    # Código de descuento ya validado en la conversación (si el cliente escribió uno)
+    codigo_fila = codigo_aplicado.get(numero)
+    codigo_texto_usado = codigo_fila["codigo"] if codigo_fila else None
+
     ahora = datetime.now(ZONA_HORARIA)
 
     # ¿Ya tiene un pedido en estado "activo" (aún no aceptado) EN ESTE MISMO RESTAURANTE?
@@ -342,7 +347,7 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
     )
     if pedido_para_actualizar:
         pedido_id = pedido_para_actualizar["id"]
-        supabase.table("pedidos").update({
+        datos_actualizar = {
             "resumen": resumen,
             "total": total,
             "tipo": tipo,
@@ -352,7 +357,14 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
             "pago_confirmado": pago_confirmado,
             "hora": ahora.strftime("%I:%M %p"),
             "fecha": ahora.isoformat(),
-        }).eq("id", pedido_id).execute()
+        }
+        # Solo tocamos codigo_descuento si hay uno nuevo por guardar — así no
+        # borramos uno ya consumido si el cliente sigue editando el mismo pedido.
+        if codigo_texto_usado and not pedido_para_actualizar.get("codigo_descuento"):
+            datos_actualizar["codigo_descuento"] = codigo_texto_usado
+            consumir_uso_codigo(codigo_fila)
+            codigo_aplicado.pop(numero, None)
+        supabase.table("pedidos").update(datos_actualizar).eq("id", pedido_id).execute()
         return get_pedido_by_id(pedido_id), False
 
     pedido_id = str(uuid.uuid4())[:8].upper()
@@ -370,10 +382,14 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
         "quejas": [],
         "metodo_pago": metodo_pago,
         "pago_confirmado": pago_confirmado,
+        "codigo_descuento": codigo_texto_usado,
         "hora": ahora.strftime("%I:%M %p"),
         "fecha": ahora.isoformat(),
     }
     supabase.table("pedidos").insert(pedido).execute()
+    if codigo_fila:
+        consumir_uso_codigo(codigo_fila)
+        codigo_aplicado.pop(numero, None)
     return pedido, True
 
 def actualizar_estado_pedido(pedido_id, nuevo_estado):
@@ -594,6 +610,55 @@ def calcular_ganancias_dom(dom_id):
             ganancia_hoy += valor
     return {"ganancia_hoy": ganancia_hoy, "ganancia_semana": ganancia_semana}
 
+def buscar_codigo_descuento(codigo_texto):
+    """Busca un código de descuento por su texto, sin importar mayúsculas/minúsculas."""
+    try:
+        res = supabase.table("codigos_descuento").select("*").ilike("codigo", codigo_texto).execute()
+        return res.data[0] if res.data else None
+    except Exception:
+        traceback.print_exc()
+        return None
+
+def validar_codigo_descuento(codigo_texto, rest_key):
+    """Valida que un código se pueda usar ahora mismo en este restaurante.
+    Devuelve (fila, None) si es válido, o (None, mensaje_error) si no."""
+    fila = buscar_codigo_descuento(codigo_texto)
+    if not fila:
+        return None, "No encontramos ese código."
+    if not fila.get("activo", True):
+        return None, "Ese código ya no está disponible."
+    if (fila.get("usos_restantes") or 0) <= 0:
+        return None, "Ese código ya se agotó."
+    fecha_exp = fila.get("fecha_expiracion")
+    if fecha_exp:
+        try:
+            exp = datetime.fromisoformat(str(fecha_exp).replace("Z", "+00:00"))
+            ahora = datetime.now(exp.tzinfo) if exp.tzinfo else datetime.now(ZONA_HORARIA).replace(tzinfo=None)
+            if ahora > exp:
+                return None, "Ese código ya venció."
+        except Exception:
+            pass
+    # restaurante_id vacío/null = código de Caza Delivery, válido en cualquier restaurante
+    if fila.get("restaurante_id") and fila["restaurante_id"] != rest_key:
+        return None, "Ese código no aplica para este restaurante."
+    return fila, None
+
+def descripcion_descuento(fila):
+    if fila.get("tipo") == "porcentaje":
+        return f"{int(fila['valor'])}% de descuento"
+    return f"${int(fila['valor']):,}".replace(",", ".") + " de descuento"
+
+def consumir_uso_codigo(codigo_row):
+    """Descuenta un uso del código; lo desactiva solo si ya no le quedan usos."""
+    restantes = max((codigo_row.get("usos_restantes") or 1) - 1, 0)
+    datos = {"usos_restantes": restantes}
+    if restantes <= 0:
+        datos["activo"] = False
+    try:
+        supabase.table("codigos_descuento").update(datos).eq("id", codigo_row["id"]).execute()
+    except Exception:
+        traceback.print_exc()
+
 def lista_restaurantes():
     lineas = ["🍽️ *Bienvenido a Ipiales Delivery*\n\nElige un restaurante:\n"]
     for i, (key, r) in enumerate(_cache_restaurantes.items(), 1):
@@ -602,7 +667,7 @@ def lista_restaurantes():
     lineas.append("\nResponde con el *número* o el *nombre* del restaurante.")
     return "\n".join(lineas)
 
-def build_system_prompt(rest_key, cliente=None):
+def build_system_prompt(rest_key, cliente=None, descuento=None):
     r = get_restaurante(rest_key)
     extra = _estado_extra.get(rest_key, {})
     items = get_menu(rest_key)
@@ -644,10 +709,20 @@ def build_system_prompt(rest_key, cliente=None):
 
     metodos_pago = metodos_pago_texto(r)
 
+    descuento_txt = ""
+    instr_descuento = ""
+    if descuento:
+        descuento_txt = f"\nDESCUENTO ACTIVO: {descripcion_descuento(descuento)} (código {descuento['codigo']})."
+        instr_descuento = (
+            "\n- El cliente ya tiene un código de descuento validado (ver DESCUENTO ACTIVO arriba). Aplícalo al "
+            "total del pedido antes de mostrar el resumen final, y muestra en el resumen tanto el subtotal como "
+            "el descuento y el total ya con el descuento aplicado."
+        )
+
     return f"""Eres el asistente virtual de *{r['nombre']}*, en {r['direccion']}, Ipiales.
 HORARIO: {formato_horario(r)}
 DOMICILIO: {dom}
-MÉTODOS DE PAGO: {metodos_pago}.
+MÉTODOS DE PAGO: {metodos_pago}.{descuento_txt}
 MENÚ:
 {chr(10).join(menu_activo)}
 {notas}{espera}{saludo}
@@ -665,7 +740,7 @@ INSTRUCCIONES:
 - Si el cliente mencionó lugar de entrega, es domicilio. Confirma la dirección.
 - Si el pedido es a domicilio y NO tienes clara la dirección, dile textualmente algo como: "Para el domicilio, escríbeme tu dirección completa (barrio, calle/carrera y número), o si prefieres, envíame tu ubicación actual desde WhatsApp (toca el clip 📎 → Ubicación)." No cierres el pedido a domicilio sin dirección confirmada por ninguna de esas dos vías.
 - En el resumen final de un pedido a domicilio SIEMPRE detalla los datos de entrega: dirección exacta (o la ubicación que envió) y el nombre de quien recibe.
-- Antes de mostrar el resumen final, pregúntale al cliente cómo va a pagar (elige una de las opciones en MÉTODOS DE PAGO de arriba). Si elige Nequi o Bre-B, dale el número EXACTO que aparece en MÉTODOS DE PAGO y pídele que envíe la foto del comprobante de la transferencia aquí por WhatsApp. Incluye el método de pago elegido en el resumen final.
+- Antes de mostrar el resumen final, pregúntale al cliente cómo va a pagar (elige una de las opciones en MÉTODOS DE PAGO de arriba). Si elige Nequi o Bre-B, dale el número EXACTO que aparece en MÉTODOS DE PAGO y pídele que envíe la foto del comprobante de la transferencia aquí por WhatsApp. Incluye el método de pago elegido en el resumen final.{instr_descuento}
 - Al confirmar el pedido SIEMPRE termina con una frase EXACTA en una línea separada, según el método de pago elegido:
   - Si paga en EFECTIVO: "✅ Pedido recibido. Estamos preparando tu pedido 🍔"
   - Si paga por NEQUI o BRE-B: "✅ Pedido recibido. Apenas confirmes tu pago (envía la captura aquí) el restaurante lo revisará y ahí sí empezaremos a preparar tu pedido 🍔"
@@ -2067,6 +2142,79 @@ async def api_restaurante_panel_horario(request: Request):
     except Exception as e:
         return {"ok": False, "msg": str(e)}
 
+@app.get("/api/restaurante-panel/codigos")
+async def api_restaurante_panel_get_codigos(request: Request):
+    rest_key = verificar_token_restaurante(request.cookies.get("rest_session", ""))
+    if not rest_key:
+        raise HTTPException(status_code=403)
+    try:
+        res = supabase.table("codigos_descuento").select("*").eq("restaurante_id", rest_key).order("fecha_creacion", desc=True).execute()
+        return {"ok": True, "data": res.data or []}
+    except Exception as e:
+        return {"ok": False, "msg": str(e)}
+
+@app.post("/api/restaurante-panel/codigos")
+async def api_restaurante_panel_crear_codigo(request: Request):
+    body = await request.json()
+    rest_key = verificar_token_restaurante(request.cookies.get("rest_session", ""))
+    if not rest_key:
+        raise HTTPException(status_code=403)
+    try:
+        codigo_texto = (body.get("codigo") or "").strip().upper()
+        if not codigo_texto:
+            return {"ok": False, "msg": "El código es obligatorio"}
+        usos = int(body.get("usos_totales") or 1)
+        fila = {
+            "codigo": codigo_texto,
+            "restaurante_id": rest_key,  # forzado al propio restaurante, no puede crear para otro
+            "tipo": body.get("tipo") or "porcentaje",
+            "valor": float(body.get("valor") or 0),
+            "usos_totales": usos,
+            "usos_restantes": usos,
+            "activo": True,
+            "fecha_expiracion": body.get("fecha_expiracion") or None,
+        }
+        supabase.table("codigos_descuento").insert(fila).execute()
+        return {"ok": True}
+    except Exception as e:
+        error_txt = str(e).lower()
+        if "duplicate" in error_txt or "unique" in error_txt:
+            return {"ok": False, "msg": "Ya existe un código con ese texto"}
+        return {"ok": False, "msg": str(e)}
+
+@app.put("/api/restaurante-panel/codigos/{codigo_id}")
+async def api_restaurante_panel_editar_codigo(codigo_id: int, request: Request):
+    body = await request.json()
+    rest_key = verificar_token_restaurante(request.cookies.get("rest_session", ""))
+    if not rest_key:
+        raise HTTPException(status_code=403)
+    try:
+        existente = supabase.table("codigos_descuento").select("*").eq("id", codigo_id).execute()
+        if not existente.data or existente.data[0].get("restaurante_id") != rest_key:
+            return {"ok": False, "msg": "Este código no te pertenece"}
+        datos = {k: v for k, v in body.items() if k not in ["id", "codigo", "restaurante_id"]}
+        if "valor" in datos: datos["valor"] = float(datos["valor"])
+        if "usos_totales" in datos: datos["usos_totales"] = int(datos["usos_totales"])
+        if "usos_restantes" in datos: datos["usos_restantes"] = int(datos["usos_restantes"])
+        supabase.table("codigos_descuento").update(datos).eq("id", codigo_id).execute()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "msg": str(e)}
+
+@app.delete("/api/restaurante-panel/codigos/{codigo_id}")
+async def api_restaurante_panel_eliminar_codigo(codigo_id: int, request: Request):
+    rest_key = verificar_token_restaurante(request.cookies.get("rest_session", ""))
+    if not rest_key:
+        raise HTTPException(status_code=403)
+    try:
+        existente = supabase.table("codigos_descuento").select("*").eq("id", codigo_id).execute()
+        if not existente.data or existente.data[0].get("restaurante_id") != rest_key:
+            return {"ok": False, "msg": "Este código no te pertenece"}
+        supabase.table("codigos_descuento").delete().eq("id", codigo_id).execute()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "msg": str(e)}
+
 # ── RUTAS DOMICILIARIOS ──────────────────────────────────────────────────────
 
 @app.get("/domiciliarios")
@@ -2630,6 +2778,17 @@ async def recibir_mensaje(request: Request):
                 enviar_whatsapp(numero, "¿Qué te gustaría pedir? 😊")
                 return {"status": "ok"}
 
+            m_codigo = re.search(r"c[oó]digo\s*:?\s*([a-zA-Z0-9_-]{3,20})", texto, re.IGNORECASE)
+            if m_codigo:
+                codigo_texto = m_codigo.group(1).upper()
+                fila, error = validar_codigo_descuento(codigo_texto, rest_key)
+                if fila:
+                    codigo_aplicado[numero] = fila
+                    enviar_whatsapp(numero, f"✅ Código *{codigo_texto}* aplicado: {descripcion_descuento(fila)}. Se descontará de tu total al confirmar el pedido.")
+                else:
+                    enviar_whatsapp(numero, f"❌ {error}")
+                return {"status": "ok"}
+
             if any(p in texto_lower for p in ["ayuda", "help"]):
                 enviar_whatsapp(numero,
                     "🤖 *¿Qué puedo hacer por ti?*\n\n"
@@ -2697,7 +2856,7 @@ async def recibir_mensaje(request: Request):
         resp = ai.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=600,
-            system=build_system_prompt(rest_key, cliente),
+            system=build_system_prompt(rest_key, cliente, codigo_aplicado.get(numero)),
             messages=historial[numero],
         )
         texto_respuesta = resp.content[0].text
@@ -3078,6 +3237,67 @@ async def admin_get_clientes(request: Request):
     try:
         res = supabase.table("clientes").select("*").order("fecha_registro", desc=True).limit(100).execute()
         return {"ok": True, "data": res.data or []}
+    except Exception as e:
+        return {"ok": False, "msg": str(e)}
+
+# ── APIs ADMIN: CÓDIGOS DE DESCUENTO ──────────────────────────────────────────
+
+@app.get("/api/admin/codigos")
+async def admin_get_codigos(request: Request):
+    check_admin(request)
+    try:
+        res = supabase.table("codigos_descuento").select("*").order("fecha_creacion", desc=True).execute()
+        return {"ok": True, "data": res.data or []}
+    except Exception as e:
+        return {"ok": False, "msg": str(e)}
+
+@app.post("/api/admin/codigos")
+async def admin_crear_codigo(request: Request):
+    body = await request.json()
+    check_admin(request)
+    try:
+        codigo_texto = (body.get("codigo") or "").strip().upper()
+        if not codigo_texto:
+            return {"ok": False, "msg": "El código es obligatorio"}
+        usos = int(body.get("usos_totales") or 1)
+        fila = {
+            "codigo": codigo_texto,
+            "restaurante_id": body.get("restaurante_id") or None,
+            "tipo": body.get("tipo") or "porcentaje",
+            "valor": float(body.get("valor") or 0),
+            "usos_totales": usos,
+            "usos_restantes": usos,
+            "activo": True,
+            "fecha_expiracion": body.get("fecha_expiracion") or None,
+        }
+        supabase.table("codigos_descuento").insert(fila).execute()
+        return {"ok": True}
+    except Exception as e:
+        error_txt = str(e).lower()
+        if "duplicate" in error_txt or "unique" in error_txt:
+            return {"ok": False, "msg": "Ya existe un código con ese texto"}
+        return {"ok": False, "msg": str(e)}
+
+@app.put("/api/admin/codigos/{codigo_id}")
+async def admin_editar_codigo(codigo_id: int, request: Request):
+    body = await request.json()
+    check_admin(request)
+    try:
+        datos = {k: v for k, v in body.items() if k not in ["id", "codigo"]}
+        if "valor" in datos: datos["valor"] = float(datos["valor"])
+        if "usos_totales" in datos: datos["usos_totales"] = int(datos["usos_totales"])
+        if "usos_restantes" in datos: datos["usos_restantes"] = int(datos["usos_restantes"])
+        supabase.table("codigos_descuento").update(datos).eq("id", codigo_id).execute()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "msg": str(e)}
+
+@app.delete("/api/admin/codigos/{codigo_id}")
+async def admin_eliminar_codigo(codigo_id: int, request: Request):
+    check_admin(request)
+    try:
+        supabase.table("codigos_descuento").delete().eq("id", codigo_id).execute()
+        return {"ok": True}
     except Exception as e:
         return {"ok": False, "msg": str(e)}
 
