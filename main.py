@@ -359,10 +359,13 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
             "fecha": ahora.isoformat(),
         }
         # Solo tocamos codigo_descuento si hay uno nuevo por guardar — así no
-        # borramos uno ya consumido si el cliente sigue editando el mismo pedido.
+        # borramos uno ya reservado si el cliente sigue editando el mismo pedido.
+        # OJO: el código se RESERVA aquí (queda anotado en el pedido) pero el uso
+        # se descuenta del contador solo cuando el pedido se entrega de verdad
+        # (ver consumir_codigo_si_aplica) — así si el pedido se cancela, el
+        # código sigue disponible en vez de haberse quemado por nada.
         if codigo_texto_usado and not pedido_para_actualizar.get("codigo_descuento"):
             datos_actualizar["codigo_descuento"] = codigo_texto_usado
-            consumir_uso_codigo(codigo_fila)
             codigo_aplicado.pop(numero, None)
         supabase.table("pedidos").update(datos_actualizar).eq("id", pedido_id).execute()
         return get_pedido_by_id(pedido_id), False
@@ -388,7 +391,8 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
     }
     supabase.table("pedidos").insert(pedido).execute()
     if codigo_fila:
-        consumir_uso_codigo(codigo_fila)
+        # Se reserva (queda anotado en el pedido), pero el uso se descuenta del
+        # contador solo cuando el pedido llegue a "entregado" de verdad.
         codigo_aplicado.pop(numero, None)
     return pedido, True
 
@@ -656,6 +660,17 @@ def validar_codigo_descuento(codigo_texto, rest_key, numero=None):
     if numero and cliente_ya_uso_codigo(numero, fila["codigo"]):
         return None, "Ya usaste este código antes — cada código solo se puede usar una vez por cliente."
     return fila, None
+
+def consumir_codigo_si_aplica(pedido):
+    """Al completarse de verdad un pedido (entregado), se resta el uso del
+    código de descuento que tenía reservado, si tenía alguno. Si el pedido se
+    cancela en cambio, esto nunca se llama y el código sigue disponible."""
+    codigo_texto = pedido.get("codigo_descuento")
+    if not codigo_texto:
+        return
+    fila = buscar_codigo_descuento(codigo_texto)
+    if fila:
+        consumir_uso_codigo(fila)
 
 def descripcion_descuento(fila):
     if fila.get("tipo") == "porcentaje":
@@ -1884,6 +1899,7 @@ def _aplicar_cambio_estado_pedido(pedido, nuevo):
         enviar_whatsapp(numero, f"🙌 *¡Pedido entregado!* Esperamos que lo disfrutes.\n¡Gracias por elegir {nombre_rest}! 😊")
         enviar_whatsapp(numero, "⭐ ¿Cómo calificarías el servicio? Responde del 1 al 5 (puedes agregar un comentario si quieres).")
         clientes_esperando_calificacion.setdefault(numero, []).append(pedido_id)
+        consumir_codigo_si_aplica(pedido)
     if nuevo == "cancelado" and anterior != "cancelado":
         enviar_whatsapp(numero, f"❌ *Pedido #{pedido_id} cancelado.*\nSi tienes dudas contáctanos. ¡Hasta pronto! 🍔")
     return {"ok": True}
@@ -2389,6 +2405,7 @@ async def marcar_entregado_dom(request: Request):
     enviar_whatsapp(pedido["numero_cliente"],
         "⭐ ¿Cómo calificarías el servicio? Responde del 1 al 5 (puedes agregar un comentario si quieres).")
     clientes_esperando_calificacion.setdefault(pedido["numero_cliente"], []).append(pedido_id)
+    consumir_codigo_si_aplica(pedido)
     enviar_whatsapp(ADMIN_NUMBER,
         f"✅ *Pedido #{pedido_id} entregado*\n🛵 Por: {nombre}")
     # Actualizar contador domiciliario
