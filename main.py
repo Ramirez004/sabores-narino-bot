@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException, UploadFile, File
 from fastapi.responses import PlainTextResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-import anthropic, requests, os, traceback, uuid, re, unicodedata, hmac, hashlib, time, math
+import anthropic, requests, os, traceback, uuid, re, unicodedata, hmac, hashlib, time, math, asyncio
 from urllib.parse import quote
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, date
@@ -54,6 +54,15 @@ RATE_LIMIT_MAX_MENSAJES = 10    # máximo mensajes por ventana
 RATE_LIMIT_VENTANA_SEG  = 60    # ventana en segundos
 RATE_LIMIT_BLOQUEO_SEG  = 60    # tiempo de bloqueo en segundos
 MAX_CHARS_MENSAJE       = 500   # máximo caracteres por mensaje
+
+# Límite de intentos en los logins de admin/restaurante/panel general (por IP,
+# solo cuenta intentos FALLIDOS — a diferencia del rate limit de arriba, que
+# cuenta todos los mensajes de WhatsApp).
+_intentos_login = {}   # "tipo:ip" -> [timestamps de intentos fallidos]
+_bloqueos_login = {}   # "tipo:ip" -> timestamp hasta cuando está bloqueado
+INTENTOS_LOGIN_MAX = 5
+INTENTOS_LOGIN_VENTANA_SEG = 300
+INTENTOS_LOGIN_BLOQUEO_SEG = 300
 clientes_esperando_decision = {}
 clientes_esperando_calificacion = {}  # numero -> [pedido_id, ...] (cola: puede haber más de un pedido por calificar)
 clientes_esperando_cual_pedido = {}  # numero -> {"accion": str, "texto": str, "pedidos": [pedido, ...]}
@@ -899,6 +908,78 @@ def consumir_uso_codigo(codigo_row):
     except Exception:
         traceback.print_exc()
 
+REENGANCHE_DIAS = 7
+REENGANCHE_CODIGO = os.getenv("REENGANCHE_CODIGO", "").strip()
+
+def enviar_reenganches_pendientes():
+    """Ve pedidos entregados hace ~REENGANCHE_DIAS días y les manda a esos
+    clientes un mensaje con un código de descuento para que vuelvan a pedir.
+    No hace nada si no se configuró REENGANCHE_CODIGO (variable de entorno en
+    Railway) — la función queda apagada por defecto hasta que el admin cree
+    ese código desde el panel y configure la variable."""
+    if not REENGANCHE_CODIGO:
+        return
+    try:
+        objetivo = datetime.now(ZONA_HORARIA) - timedelta(days=REENGANCHE_DIAS)
+        desde = (objetivo - timedelta(hours=6)).isoformat()
+        hasta = (objetivo + timedelta(hours=6)).isoformat()
+        res = supabase.table("pedidos").select("*")\
+            .eq("estado", "entregado").gte("fecha", desde).lte("fecha", hasta).execute()
+        pedidos = res.data or []
+    except Exception:
+        traceback.print_exc()
+        return
+    ya_procesados = set()
+    for p in pedidos:
+        numero = p.get("numero_cliente")
+        if not numero or numero in ya_procesados:
+            continue
+        ya_procesados.add(numero)
+        cli = get_cliente(numero)
+        if not cli:
+            continue
+        # No reenviar si ya se le mandó uno hace menos de 30 días (aunque tenga
+        # varios pedidos entregados en la ventana de esta corrida).
+        ultimo = cli.get("ultimo_reenganche_enviado")
+        if ultimo:
+            try:
+                ultimo_dt = datetime.fromisoformat(str(ultimo).replace("Z", "+00:00"))
+                if ultimo_dt.tzinfo is None:
+                    ultimo_dt = pytz.utc.localize(ultimo_dt)
+                if (datetime.now(ZONA_HORARIA) - ultimo_dt.astimezone(ZONA_HORARIA)).days < 30:
+                    continue
+            except Exception:
+                pass
+        # validar_codigo_descuento también revisa que el código siga activo,
+        # no esté vencido, aplique a este restaurante y que el cliente no lo
+        # haya usado ya — si algo de eso falla, no tiene sentido avisarle.
+        fila_codigo, _error = validar_codigo_descuento(REENGANCHE_CODIGO, p.get("restaurante_id", ""), numero)
+        if not fila_codigo:
+            continue
+        try:
+            enviar_whatsapp(numero,
+                f"¡Hola {cli.get('nombre','')}! 👋 ¿Qué tal estuvo tu último pedido?\n"
+                f"Como agradecimiento, usa el código *{REENGANCHE_CODIGO}* en tu próximo pedido: "
+                f"{descripcion_descuento(fila_codigo)}. ¡Te esperamos! 😊"
+            )
+            actualizar_cliente(numero, {"ultimo_reenganche_enviado": datetime.now(ZONA_HORARIA).isoformat()})
+        except Exception:
+            traceback.print_exc()
+
+async def tarea_reenganche_clientes():
+    """Corre en segundo plano durante toda la vida del proceso: revisa cada 6
+    horas si hay clientes elegibles para el mensaje de reenganche."""
+    while True:
+        try:
+            enviar_reenganches_pendientes()
+        except Exception:
+            traceback.print_exc()
+        await asyncio.sleep(6 * 60 * 60)
+
+@app.on_event("startup")
+async def iniciar_tareas_programadas():
+    asyncio.create_task(tarea_reenganche_clientes())
+
 def lista_restaurantes():
     lineas = ["🍽️ *Bienvenido a Ipiales Delivery*\n\nElige un restaurante:\n"]
     for i, (key, r) in enumerate(_cache_restaurantes.items(), 1):
@@ -1287,6 +1368,40 @@ def verificar_rate_limit(numero):
 
     return True, None
 
+
+def _ip_cliente(request):
+    """IP real del que hace la petición, prefiriendo X-Forwarded-For (Railway
+    corre detrás de un proxy, así que request.client.host solo sería el proxy)."""
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "desconocido"
+
+def login_bloqueado(request, tipo):
+    """Revisa si esta IP está bloqueada para este tipo de login por demasiados
+    intentos fallidos recientes. Devuelve (bloqueado, segundos_restantes)."""
+    clave = f"{tipo}:{_ip_cliente(request)}"
+    ahora = time.time()
+    hasta = _bloqueos_login.get(clave)
+    if hasta and ahora < hasta:
+        return True, int(hasta - ahora)
+    if hasta:
+        del _bloqueos_login[clave]
+    return False, 0
+
+def registrar_intento_fallido(request, tipo):
+    clave = f"{tipo}:{_ip_cliente(request)}"
+    ahora = time.time()
+    intentos = [t for t in _intentos_login.get(clave, []) if ahora - t < INTENTOS_LOGIN_VENTANA_SEG]
+    intentos.append(ahora)
+    _intentos_login[clave] = intentos
+    if len(intentos) >= INTENTOS_LOGIN_MAX:
+        _bloqueos_login[clave] = ahora + INTENTOS_LOGIN_BLOQUEO_SEG
+        _intentos_login[clave] = []
+
+def registrar_intento_exitoso(request, tipo):
+    clave = f"{tipo}:{_ip_cliente(request)}"
+    _intentos_login.pop(clave, None)
 
 def procesar_mensaje_domiciliario(numero, texto):
     """Maneja mensajes de domiciliarios (entro turno / salgo turno).
@@ -1817,6 +1932,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         <h2>Pedidos</h2>
         <div style="display:flex;gap:8px;align-items:center">
           <select class="filtro-rest" id="filtro-rest-pedidos" onchange="cambiarFiltroRestaurante(this.value)"><option value="">Todos los restaurantes</option></select>
+          <button class="btn btn-ghost" onclick="exportarCSV(filtrar(tabActual))">⬇ Exportar CSV</button>
           <button class="btn btn-primary" onclick="cargarPedidos()">↻ Actualizar</button>
         </div>
       </div>
@@ -1847,6 +1963,23 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 <script>
 const pw="{{PW}}";
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+function exportarCSV(lista){
+  if(!lista||!lista.length){alert('No hay pedidos para exportar');return;}
+  const filas=[["ID","Fecha","Restaurante","Cliente","Tipo","Dirección","Productos","Subtotal","Descuento","Total","Pago","Estado"]];
+  lista.forEach(p=>filas.push([
+    p.id, p.fecha||'', p.restaurante_nombre||'', p.numero_cliente||'', p.tipo||'', p.direccion||'',
+    p.productos||'', p.subtotal||0, p.descuento_monto||0, p.total||0, p.metodo_pago||'', p.estado||''
+  ]));
+  const csv=filas.map(f=>f.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+  const blob=new Blob(["﻿"+csv],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=`pedidos_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
 let todos=[],tabActual="todos",restauranteFiltro="";
 
 // ── TEMA CLARO / OSCURO ──
@@ -2113,9 +2246,15 @@ async def raiz():
         return HTMLResponse(f.read())
 
 @app.get("/panel")
-async def panel(pw: str = ""):
+async def panel(request: Request, pw: str = ""):
+    bloqueado, segundos = login_bloqueado(request, "panel_general")
+    if bloqueado:
+        return HTMLResponse(f"<h3 style='font-family:sans-serif;text-align:center;margin-top:80px'>Demasiados intentos fallidos. Espera {segundos} segundos e intenta de nuevo.</h3>")
     if pw == PANEL_PASSWORD:
+        registrar_intento_exitoso(request, "panel_general")
         return HTMLResponse(PANEL_HTML.replace("{{PW}}", PANEL_PASSWORD))
+    if pw:
+        registrar_intento_fallido(request, "panel_general")
     return HTMLResponse(LOGIN_HTML)
 
 @app.get("/api/pedidos")
@@ -2245,10 +2384,15 @@ async def estado_domiciliario(pedido_id: str, pw: str = ""):
 
 @app.post("/panel-restaurante/login")
 async def panel_restaurante_login(request: Request):
+    bloqueado, segundos = login_bloqueado(request, "restaurante")
+    if bloqueado:
+        return {"ok": False, "msg": f"Demasiados intentos fallidos. Espera {segundos} segundos."}
     body = await request.json()
     rest_key = get_restaurante_key_por_password(body.get("password", ""))
     if not rest_key:
+        registrar_intento_fallido(request, "restaurante")
         return {"ok": False, "msg": "Contraseña incorrecta"}
+    registrar_intento_exitoso(request, "restaurante")
     resp = JSONResponse({"ok": True})
     resp.set_cookie(
         "rest_session", generar_token_restaurante(rest_key),
@@ -3681,6 +3825,53 @@ async def admin_eliminar_codigo(codigo_id: int, request: Request):
     except Exception as e:
         return {"ok": False, "msg": str(e)}
 
+def _nombre_producto(linea):
+    """Deja solo el nombre del producto en una línea de pedido, quitando precio
+    y marcadores de cantidad (1x / x1), para poder agrupar por nombre."""
+    s = re.sub(r"\$\s?[\d.]+.*$", "", linea)
+    s = re.sub(r"^\s*\d+\s*[xX]\s*", "", s)
+    s = re.sub(r"\s*[xX]\s*\d+\s*$", "", s)
+    s = re.sub(r"[^\w\s]", " ", s, flags=re.UNICODE)
+    return normalizar_texto(s).strip()
+
+def top_productos_pedidos(pedidos, dias=30, top_n=5):
+    """Cuenta los productos más pedidos en los últimos N días, a partir del
+    campo "productos" que ya se guarda en cada pedido (best-effort: solo
+    cuenta para dar una idea, no valida contra el menú como verificar_subtotal)."""
+    limite = (datetime.now(ZONA_HORARIA) - timedelta(days=dias)).isoformat()
+    conteo = {}
+    for p in pedidos:
+        if p.get("estado") == "cancelado":
+            continue
+        if p.get("fecha", "") < limite:
+            continue
+        texto = p.get("productos") or ""
+        if not texto:
+            continue
+        for linea in texto.split("\n"):
+            linea = linea.strip()
+            if not linea:
+                continue
+            nombre = _nombre_producto(linea)
+            if not nombre:
+                continue
+            conteo[nombre] = conteo.get(nombre, 0) + _extraer_cantidad(linea)
+    return sorted(conteo.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
+
+def ventas_por_dia_pedidos(pedidos, dias=7):
+    """Total vendido (sin cancelados) por cada uno de los últimos N días."""
+    hoy = datetime.now(ZONA_HORARIA).date()
+    resultado = []
+    for i in range(dias - 1, -1, -1):
+        d = hoy - timedelta(days=i)
+        clave = d.isoformat()
+        total = sum(
+            p.get("total", 0) for p in pedidos
+            if p.get("estado") != "cancelado" and p.get("fecha", "").startswith(clave)
+        )
+        resultado.append({"dia": clave, "total": total})
+    return resultado
+
 @app.get("/api/admin/stats")
 async def admin_get_stats(request: Request):
     check_admin(request)
@@ -3724,6 +3915,8 @@ async def admin_get_stats(request: Request):
                 "domiciliarios_disponibles": len([d for d in (doms_res.data or []) if d.get("disponible")]),
                 "pedidos_por_restaurante": por_rest,
                 "promedio_calificacion_por_restaurante": promedio_calificacion_por_rest,
+                "ventas_por_dia": ventas_por_dia_pedidos(todos),
+                "top_productos": top_productos_pedidos(todos),
             }
         }
     except Exception as e:
@@ -3733,9 +3926,14 @@ async def admin_get_stats(request: Request):
 
 @app.post("/admin/login")
 async def admin_login(request: Request):
+    bloqueado, segundos = login_bloqueado(request, "admin")
+    if bloqueado:
+        return {"ok": False, "msg": f"Demasiados intentos fallidos. Espera {segundos} segundos."}
     body = await request.json()
     if body.get("password", "") != ADMIN_PASSWORD:
+        registrar_intento_fallido(request, "admin")
         return {"ok": False, "msg": "Contraseña incorrecta"}
+    registrar_intento_exitoso(request, "admin")
     resp = JSONResponse({"ok": True})
     resp.set_cookie(
         "admin_session", generar_token_admin(),
