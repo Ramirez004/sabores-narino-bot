@@ -764,7 +764,8 @@ def build_system_prompt(rest_key, cliente=None, descuento=None):
     hay_bebidas = any("bebida" in normalizar_texto(i["categoria"]) for i in menu_activo_items)
     notas = ("\nNOTAS DE HOY:\n- " + "\n- ".join(extra["notas"])) if extra.get("notas") else ""
     espera = f"\nTIEMPO DE ESPERA: {extra['tiempo_espera']} minutos." if extra.get("tiempo_espera") else ""
-    dom = f"Sí. Costo: ${costo_domicilio(r):,}.".replace(",", ".") if extra.get("domicilio_activo", True) else "No disponible."
+    costo_dom_normal = costo_domicilio(r)
+    dom = f"Sí. Costo: ${costo_dom_normal:,}.".replace(",", ".") if extra.get("domicilio_activo", True) else "No disponible."
 
     saludo = ""
     instr_direccion_guardada = (
@@ -807,9 +808,12 @@ def build_system_prompt(rest_key, cliente=None, descuento=None):
 
         if aplica_a == "domicilio":
             # El costo de domicilio NO depende del carrito (es fijo por restaurante), así que
-            # lo calculamos aquí mismo en vez de pedirle a Claude que haga la resta/porcentaje —
-            # así nunca se le "pasa" el cálculo ni deja el domicilio a medio descontar.
-            costo_dom_normal = costo_domicilio(r)
+            # el valor ya-con-descuento lo calculamos aquí mismo en vez de pedirle a Claude que
+            # haga la resta/porcentaje — así nunca se le "pasa" el cálculo. Lo que si depende
+            # del carrito es si se cumple el mínimo de compra, así que dejamos AMBOS números
+            # (normal y con descuento) en la misma línea DOMICILIO de arriba, para que Claude
+            # solo tenga que comparar el subtotal contra el mínimo y copiar el número que
+            # corresponda — nunca calcular nada, y nunca ver un solo número que contradiga esto.
             valor_desc = descuento.get("valor", 0) or 0
             if descuento.get("tipo") == "porcentaje":
                 monto_descuento_dom = costo_dom_normal * (valor_desc / 100)
@@ -819,12 +823,21 @@ def build_system_prompt(rest_key, cliente=None, descuento=None):
             domicilio_final = max(costo_dom_normal - monto_descuento_dom, 0)
             domicilio_final_txt = f"{domicilio_final:,.0f}".replace(",", ".")
             costo_dom_normal_txt = f"{costo_dom_normal:,.0f}".replace(",", ".")
+            if monto_min > 0:
+                dom = (
+                    f"Sí. Costo normal: ${costo_dom_normal_txt}. Con el código {descuento['codigo']} aplicado, SI el "
+                    f"subtotal es de al menos ${monto_min_txt}: ${domicilio_final_txt} exacto (no calcules el "
+                    f"descuento, solo compara el subtotal contra el mínimo y usa el número que corresponda)."
+                )
+            else:
+                dom = (
+                    f"Sí. Costo: ${domicilio_final_txt} exacto (código {descuento['codigo']} aplicado — el domicilio "
+                    f"normal de ${costo_dom_normal_txt} ya quedó rebajado, no hagas tú esa cuenta, solo usa este número)."
+                )
             instr_aplicacion = (
-                f"{condicion_minimo}El costo de domicilio para ESTE pedido, YA CON EL DESCUENTO APLICADO, es "
-                f"EXACTAMENTE ${domicilio_final_txt} (el domicilio normal de ${costo_dom_normal_txt} ya quedó "
-                f"rebajado por este código — no hagas tú esa cuenta, ya viene calculada, solo copia este número "
-                f"tal cual en el resumen). Si el pedido es para recoger en el local (no es domicilio), este "
-                f"descuento no aplica: avísale al cliente que este código solo sirve para pedidos a domicilio."
+                f"El costo de domicilio para ESTE pedido ya está resuelto arriba en DOMICILIO — úsalo tal cual, sin "
+                f"calcular nada. Si el pedido es para recoger en el local (no es domicilio), este descuento no "
+                f"aplica: avísale al cliente que este código solo sirve para pedidos a domicilio."
             )
         else:
             instr_aplicacion = f"{condicion_minimo}Descuéntalo del total del pedido."
