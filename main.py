@@ -361,6 +361,9 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
     # texto de Claude haya hecho bien la resta o el porcentaje. Así el monto que
     # queda guardado (y que ve el restaurante) siempre es exacto, sin importar lo
     # que haya mostrado el chat en ese momento.
+    # descuento_monto queda guardado en el pedido para que los paneles puedan
+    # mostrar "cuánto fue el descuento" sin tener que volver a calcularlo.
+    descuento_monto = 0
     codigo_para_total = codigo_fila
     if not codigo_para_total and pedido_para_actualizar and pedido_para_actualizar.get("codigo_descuento"):
         codigo_para_total = buscar_codigo_descuento(pedido_para_actualizar["codigo_descuento"])
@@ -376,17 +379,21 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
                     monto_desc = costo_dom * (valor_desc / 100) if es_porcentaje else valor_desc
                     monto_desc = min(monto_desc, costo_dom)
                     total = round(subtotal + costo_dom - monto_desc)
+                    descuento_monto = round(monto_desc)
                 # Si es "recoger", este código no aplica: el total queda como el subtotal normal.
             else:
                 monto_desc = subtotal * (valor_desc / 100) if es_porcentaje else valor_desc
                 monto_desc = min(monto_desc, subtotal)
                 total = round(subtotal - monto_desc + costo_dom)
+                descuento_monto = round(monto_desc)
 
     if pedido_para_actualizar:
         pedido_id = pedido_para_actualizar["id"]
         datos_actualizar = {
             "resumen": resumen,
             "productos": productos_texto,
+            "subtotal": subtotal,
+            "descuento_monto": descuento_monto,
             "total": total,
             "tipo": tipo,
             "direccion": direccion,
@@ -416,6 +423,8 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
         "restaurante_nombre": r["nombre"] if r else rest_key,
         "resumen": resumen,
         "productos": productos_texto,
+        "subtotal": subtotal,
+        "descuento_monto": descuento_monto,
         "total": total,
         "tipo": tipo,
         "direccion": direccion,
