@@ -20,6 +20,7 @@
       --green:#2e7d32;--green-light:#e8f5e9;--green-border:#c8e6c9;
       --blue:#1565c0;--blue-light:#e3f2fd;
       --purple:#6a1b9a;--purple-light:#f3e5f5;
+      --yellow:#e65100;
       --toggle-off:#e8e8e8;
       --toast-bg:#2a2a2a;--toast-text:#fff;
       --shadow-sm:0 1px 3px rgba(0,0,0,.04);
@@ -33,6 +34,7 @@
       --green:#66bb6a;--green-light:rgba(46,125,50,.2);--green-border:rgba(102,187,106,.35);
       --blue:#64b5f6;--blue-light:rgba(21,101,192,.22);
       --purple:#ba68c8;--purple-light:rgba(106,27,154,.22);
+      --yellow:#ffb74d;
       --toggle-off:#3a3f47;
       --toast-bg:#e8e8e8;--toast-text:#1a1a1a;
       --shadow-sm:0 1px 3px rgba(0,0,0,.3);
@@ -691,6 +693,39 @@
       color: var(--red-dark);
     }
 
+    .rev-item {
+      padding: 14px 0;
+      border-bottom: 1px solid var(--border2);
+      font-size: 13px;
+    }
+
+    .rev-item:last-child {
+      border-bottom: none;
+    }
+
+    .rev-item-alert {
+      border-left: 3px solid var(--red);
+      padding-left: 12px;
+      background: var(--red-light);
+      border-radius: 0 8px 8px 0;
+    }
+
+    .rev-stars {
+      color: var(--yellow);
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .rev-comment {
+      color: var(--text2);
+    }
+
+    .rev-meta {
+      color: var(--text3);
+      font-size: 11px;
+      margin-top: 4px;
+    }
+
     .card-status {
       text-align: center;
       font-size: 12px;
@@ -735,7 +770,11 @@
     }
 
     .card-btn {
-      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      padding: 6px 2px;
       border: 1px solid var(--border);
       background: var(--bg);
       border-radius: 6px;
@@ -744,6 +783,13 @@
       font-weight: 600;
       transition: all 0.2s ease;
       color: var(--text3);
+    }
+
+    .card-btn-label {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+      white-space: nowrap;
     }
 
     .card-btn:hover:not(:disabled) {
@@ -1353,6 +1399,17 @@
               </div>
             </div>
           </div>
+
+          <div class="section">
+            <div class="section-header">
+              <span class="section-icon">★</span>
+              <div>
+                <div class="section-title">Reseñas de clientes</div>
+                <div class="section-subtitle">Lo que opinan de tus pedidos entregados</div>
+              </div>
+            </div>
+            <div id="resenas-lista-propias"></div>
+          </div>
         </div>
 
         <!-- VISTA: CÓDIGOS -->
@@ -1476,8 +1533,22 @@
         }
         idsActivosConocidos = idsActuales;
 
-        render();stats();contadores();ventasHoy();renderEstado();renderHorarioDesdeEstado();
+        render();stats();contadores();ventasHoy();renderEstado();renderHorarioDesdeEstado();renderResenasPropias();
       }catch(e){console.error(e);}
+    }
+
+    function renderResenasPropias(){
+      const cont=document.getElementById('resenas-lista-propias');
+      if(!cont) return;
+      const conResena=todos.filter(p=>p.calificacion).slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+      if(!conResena.length){cont.innerHTML='<div class="empty">Aún no hay reseñas de clientes</div>';return;}
+      cont.innerHTML=conResena.map(p=>`
+        <div class="rev-item ${p.calificacion<=2?'rev-item-alert':''}">
+          <div class="rev-stars">${'★'.repeat(p.calificacion)}${'☆'.repeat(5-p.calificacion)}</div>
+          ${p.comentario_calificacion?`<div class="rev-comment">${esc(p.comentario_calificacion)}</div>`:'<div class="rev-comment" style="color:var(--text3);font-style:italic">Sin comentario, solo calificó con estrellas</div>'}
+          <div class="rev-meta">${esc(p.cliente_nombre||'Cliente')} · pedido #${esc(p.id)}</div>
+        </div>
+      `).join('');
     }
 
     function esHoy(iso){
@@ -1565,6 +1636,7 @@
     }
 
     const EST_MAP={activo:'Activo',preparando:'Recibido',enviado:'Enviado',entregado:'Entregado',cancelado:'Cancelado'};
+    const EST_ABREV={activo:'Activo',preparando:'Recib.',enviado:'Enviado',entregado:'Entreg.',cancelado:'Cancel.'};
     const BTNS=[
       {k:'activo',i:'●',c:'eb-activo'},{k:'preparando',i:'◐',c:'eb-preparando'},
       {k:'enviado',i:'▶',c:'eb-enviado'},{k:'entregado',i:'✓',c:'eb-entregado'},{k:'cancelado',i:'✕',c:'eb-cancelado'}
@@ -1598,8 +1670,20 @@
       }
     }
 
-    async function cambiarEstado(id,estado){
-      await fetch(`/api/restaurante-panel/pedidos/${id}/estado`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({estado})});
+    async function cambiarEstado(id,estado,btn){
+      // Optimista: se ve el cambio de inmediato (sin esperar la red) para que el
+      // botón responda al toque al instante; cargarTodo() al final corrige
+      // cualquier cosa si el servidor no aceptó el cambio.
+      if(btn){
+        const card=btn.closest('.card');
+        card.querySelectorAll('.card-buttons .card-btn').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        const statusEl=card.querySelector('.card-status');
+        if(statusEl){statusEl.textContent=EST_MAP[estado]||estado;statusEl.className=`card-status ${estado}`;}
+      }
+      try{
+        await fetch(`/api/restaurante-panel/pedidos/${id}/estado`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({estado})});
+      }catch(e){}
       cargarTodo();
     }
 
@@ -1633,9 +1717,9 @@
             const idxBtn=orden.indexOf(b.k);
             const bloqueado=esFinal||(idxBtn<idxActual&&b.k!=='cancelado')||(pagoPendiente&&b.k!=='cancelado'&&b.k!=='activo');
             return `<button class="card-btn ${p.estado===b.k?'active':''}"
-              title="${b.k}"
+              title="${EST_MAP[b.k]}"
               ${bloqueado?'disabled':''}
-              onclick="cambiarEstado('${p.id}','${b.k}')">${b.i}</button>`;
+              onclick="cambiarEstado('${p.id}','${b.k}',this)"><span class="card-btn-icon">${b.i}</span><span class="card-btn-label">${EST_ABREV[b.k]}</span></button>`;
           }).join('')}</div>
         </div>`;
       }).join('');
