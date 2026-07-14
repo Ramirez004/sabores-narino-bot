@@ -303,6 +303,7 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
             subtotal = int(datos_estructurados.get("subtotal", 0))
         except (ValueError, TypeError):
             subtotal = 0
+        productos_texto = (datos_estructurados.get("resumen_items") or "").strip()
         metodo_pago = datos_estructurados.get("metodo_pago")
         if metodo_pago not in ("efectivo", "nequi", "bre_b"):
             metodo_pago = None
@@ -330,6 +331,7 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
         if m:
             total = int(m.group(1).replace(".", "").replace(",", ""))
         subtotal = 0
+        productos_texto = ""
         metodo_pago = None
 
     # El pago en efectivo (o sin especificar) no requiere confirmación;
@@ -384,6 +386,7 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
         pedido_id = pedido_para_actualizar["id"]
         datos_actualizar = {
             "resumen": resumen,
+            "productos": productos_texto,
             "total": total,
             "tipo": tipo,
             "direccion": direccion,
@@ -412,6 +415,7 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
         "restaurante_id": rest_key,
         "restaurante_nombre": r["nombre"] if r else rest_key,
         "resumen": resumen,
+        "productos": productos_texto,
         "total": total,
         "tipo": tipo,
         "direccion": direccion,
@@ -2022,7 +2026,11 @@ def _iniciar_busqueda_domiciliario(pedido):
     doms = get_domiciliarios_disponibles()
     if not doms:
         return {"ok": False, "msg": "No hay domiciliarios disponibles en este momento"}
-    supabase.table("pedidos").update({"busqueda_domiciliario": True}).eq("id", pedido_id).execute()
+    try:
+        supabase.table("pedidos").update({"busqueda_domiciliario": True}).eq("id", pedido_id).execute()
+    except Exception:
+        traceback.print_exc()
+        return {"ok": False, "msg": "Falta la columna busqueda_domiciliario en la tabla pedidos (revisa el SQL pendiente en Supabase)"}
     notificar_domiciliarios_whatsapp(pedido)
     return {"ok": True, "msg": f"Buscando entre {len(doms)} domiciliario(s) disponible(s)"}
 
