@@ -701,6 +701,37 @@
       word-break: break-word;
     }
 
+    .card-pricing {
+      background: var(--surface2);
+      border-radius: 8px;
+      border: 1px solid var(--border2);
+      padding: 10px 14px;
+      margin: 12px 0;
+    }
+
+    .card-price-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 13px;
+      color: var(--text2);
+      padding: 4px 0;
+    }
+
+    .card-price-discount {
+      color: var(--green);
+      font-weight: 700;
+    }
+
+    .card-price-total {
+      border-top: 1px solid var(--border2);
+      margin-top: 4px;
+      padding-top: 8px;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
     @keyframes girar {
       from { transform: rotate(0deg); }
       to { transform: rotate(360deg); }
@@ -1638,6 +1669,21 @@
         .join('\n')
         .trim();
     }
+
+    function htmlPrecios(p){
+      const total=p.total||0;
+      const subtotal=p.subtotal||0;
+      const descuento=p.descuento_monto||0;
+      if(!total && !subtotal) return '';
+      const fmt=n=>'$'+Math.round(n).toLocaleString('es-CO');
+      let filas='';
+      if(subtotal) filas+=`<div class="card-price-row"><span>Subtotal</span><span>${fmt(subtotal)}</span></div>`;
+      if(p.codigo_descuento && descuento){
+        filas+=`<div class="card-price-row card-price-discount"><span>Descuento (${esc(p.codigo_descuento)})</span><span>-${fmt(descuento)}</span></div>`;
+      }
+      filas+=`<div class="card-price-row card-price-total"><span>Total</span><span>${fmt(total)}</span></div>`;
+      return `<div class="card-pricing">${filas}</div>`;
+    }
     function toast(msg,tipo){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show';setTimeout(()=>t.className='toast',2500);}
 
     async function cerrarSesion(){
@@ -1687,12 +1733,15 @@
     // (igual que antes, "aaaa-mm-dd"), altFormat es lo que ve el usuario
     // (dd/mm/aaaa). Cada uno limita el rango del otro para que no se pueda
     // elegir un "hasta" antes que el "desde", ni al revés.
+    // OJO: sin disableMobile (queda en su valor por defecto, false) — en
+    // celular, Flatpickr usa el selector nativo del teléfono en vez de su
+    // propio calendario, porque el calendario propio se posiciona mal en
+    // pantallas chicas (aparecía flotando en la mitad de la pantalla).
     const fpFiltroDesde = flatpickr('#f-filtro-desde', {
       locale: 'es',
       dateFormat: 'Y-m-d',
       altInput: true,
       altFormat: 'd/m/Y',
-      disableMobile: true,
       onChange(selectedDates, dateStr){ fpFiltroHasta.set('minDate', dateStr || null); }
     });
     const fpFiltroHasta = flatpickr('#f-filtro-hasta', {
@@ -1700,7 +1749,6 @@
       dateFormat: 'Y-m-d',
       altInput: true,
       altFormat: 'd/m/Y',
-      disableMobile: true,
       onChange(selectedDates, dateStr){ fpFiltroDesde.set('maxDate', dateStr || null); }
     });
 
@@ -1921,6 +1969,7 @@
             if(productos) return `<div class="card-products"><div class="card-products-label">Productos</div><div class="card-products-body">${esc(productos)}</div></div>`;
             return p.resumen?`<div class="card-summary">${esc(p.resumen)}</div>`:'';
           })()}
+          ${htmlPrecios(p)}
           ${p.modificaciones&&p.modificaciones.length?`<div class="card-mods"><strong>Modificaciones:</strong><br>${p.modificaciones.map(esc).join('<br>')}</div>`:''}
           ${p.quejas&&p.quejas.length?`<div class="card-complaints"><strong>Quejas:</strong><br>${p.quejas.map(esc).join('<br>')}</div>`:''}
           ${htmlPago(p, pagoPendiente, esFinal)}
