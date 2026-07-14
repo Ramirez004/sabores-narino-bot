@@ -232,6 +232,7 @@ Formato exacto:
 {{
   "tipo": "domicilio" o "recoger",
   "direccion": "dirección completa si es domicilio, o vacío si es recoger",
+  "subtotal": numero_entero_sin_puntos_ni_simbolos,
   "total": numero_entero_sin_puntos_ni_simbolos,
   "resumen_items": "lista de productos pedidos con cantidades y precios, en texto plano",
   "metodo_pago": "efectivo", "nequi", "bre_b" o null si no quedó claro
@@ -242,7 +243,8 @@ Reglas:
 - Si el cliente envió su ubicación (aparece un link de maps.google.com en la conversación), tipo es "domicilio" y usa ese link completo (con el nombre del lugar si lo hay) como direccion.
 - Si el cliente dijo explícitamente que recoge en el local, o nunca mencionó dirección y el bot preguntó y confirmó "recoger", tipo es "recoger".
 - Si hay duda, prioriza "domicilio" si se mencionó algún lugar.
-- total debe ser el monto final incluyendo domicilio si aplica.
+- subtotal es el valor de SOLO los productos pedidos, sin domicilio y sin descuentos.
+- total debe ser el monto final incluyendo domicilio si aplica (el que efectivamente paga el cliente).
 - metodo_pago: "efectivo" si el cliente dijo que paga en efectivo/cash; "nequi" si mencionó Nequi; "bre_b" si mencionó Bre-B o "llave"; null si nunca se mencionó cómo paga.
 
 Conversación:
@@ -297,6 +299,10 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
             m = re.search(r"Total:?\s*\$?\s?([\d.,]+)", resumen, re.IGNORECASE)
             if m:
                 total = int(m.group(1).replace(".", "").replace(",", ""))
+        try:
+            subtotal = int(datos_estructurados.get("subtotal", 0))
+        except (ValueError, TypeError):
+            subtotal = 0
         metodo_pago = datos_estructurados.get("metodo_pago")
         if metodo_pago not in ("efectivo", "nequi", "bre_b"):
             metodo_pago = None
@@ -323,6 +329,7 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
         m = re.search(r"Total:?\s*\$?\s?([\d.,]+)", resumen, re.IGNORECASE)
         if m:
             total = int(m.group(1).replace(".", "").replace(",", ""))
+        subtotal = 0
         metodo_pago = None
 
     # El pago en efectivo (o sin especificar) no requiere confirmación;
@@ -345,6 +352,34 @@ def crear_pedido(numero, resumen, confirmacion_bot, rest_key, datos_estructurado
         (p for p in activos if p["estado"] == "activo" and p.get("restaurante_id") == rest_key),
         None,
     )
+
+    # Si hay un código de descuento para este pedido (recién validado, o ya guardado
+    # de una edición anterior del mismo pedido "activo"), recalculamos el total
+    # NOSOTROS MISMOS con el subtotal extraído — nunca confiamos en que el resumen de
+    # texto de Claude haya hecho bien la resta o el porcentaje. Así el monto que
+    # queda guardado (y que ve el restaurante) siempre es exacto, sin importar lo
+    # que haya mostrado el chat en ese momento.
+    codigo_para_total = codigo_fila
+    if not codigo_para_total and pedido_para_actualizar and pedido_para_actualizar.get("codigo_descuento"):
+        codigo_para_total = buscar_codigo_descuento(pedido_para_actualizar["codigo_descuento"])
+    if codigo_para_total and subtotal > 0:
+        monto_min = codigo_para_total.get("monto_minimo") or 0
+        if subtotal >= monto_min:
+            valor_desc = codigo_para_total.get("valor", 0) or 0
+            es_porcentaje = codigo_para_total.get("tipo") == "porcentaje"
+            aplica_a = codigo_para_total.get("aplica_a") or "total"
+            costo_dom = costo_domicilio(r) if tipo == "domicilio" else 0
+            if aplica_a == "domicilio":
+                if tipo == "domicilio":
+                    monto_desc = costo_dom * (valor_desc / 100) if es_porcentaje else valor_desc
+                    monto_desc = min(monto_desc, costo_dom)
+                    total = round(subtotal + costo_dom - monto_desc)
+                # Si es "recoger", este código no aplica: el total queda como el subtotal normal.
+            else:
+                monto_desc = subtotal * (valor_desc / 100) if es_porcentaje else valor_desc
+                monto_desc = min(monto_desc, subtotal)
+                total = round(subtotal - monto_desc + costo_dom)
+
     if pedido_para_actualizar:
         pedido_id = pedido_para_actualizar["id"]
         datos_actualizar = {
@@ -771,12 +806,25 @@ def build_system_prompt(rest_key, cliente=None, descuento=None):
         ) if monto_min > 0 else ""
 
         if aplica_a == "domicilio":
+            # El costo de domicilio NO depende del carrito (es fijo por restaurante), así que
+            # lo calculamos aquí mismo en vez de pedirle a Claude que haga la resta/porcentaje —
+            # así nunca se le "pasa" el cálculo ni deja el domicilio a medio descontar.
+            costo_dom_normal = costo_domicilio(r)
+            valor_desc = descuento.get("valor", 0) or 0
+            if descuento.get("tipo") == "porcentaje":
+                monto_descuento_dom = costo_dom_normal * (valor_desc / 100)
+            else:
+                monto_descuento_dom = valor_desc
+            monto_descuento_dom = min(monto_descuento_dom, costo_dom_normal)
+            domicilio_final = max(costo_dom_normal - monto_descuento_dom, 0)
+            domicilio_final_txt = f"{domicilio_final:,.0f}".replace(",", ".")
+            costo_dom_normal_txt = f"{costo_dom_normal:,.0f}".replace(",", ".")
             instr_aplicacion = (
-                f"{condicion_minimo}Este código descuenta del COSTO DEL DOMICILIO, no de los productos — resta el "
-                f"valor indicado del costo de domicilio (ver DOMICILIO arriba), SIN que el descuento supere ese "
-                f"costo (como mucho el domicilio queda gratis, nunca se descuenta de la comida ni queda en "
-                f"negativo). Si el pedido es para recoger en el local (no es domicilio), avísale al cliente que "
-                f"este código solo aplica para pedidos a domicilio y no se puede usar en este caso."
+                f"{condicion_minimo}El costo de domicilio para ESTE pedido, YA CON EL DESCUENTO APLICADO, es "
+                f"EXACTAMENTE ${domicilio_final_txt} (el domicilio normal de ${costo_dom_normal_txt} ya quedó "
+                f"rebajado por este código — no hagas tú esa cuenta, ya viene calculada, solo copia este número "
+                f"tal cual en el resumen). Si el pedido es para recoger en el local (no es domicilio), este "
+                f"descuento no aplica: avísale al cliente que este código solo sirve para pedidos a domicilio."
             )
         else:
             instr_aplicacion = f"{condicion_minimo}Descuéntalo del total del pedido."
