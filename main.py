@@ -584,38 +584,37 @@ def ejecutar_cancelar_pedido(pedido, numero):
     enviar_whatsapp(ADMIN_NUMBER, f"⚠️ Pedido #{pedido['id']} cancelado por +{numero}")
     restaurar_uso_codigo_si_aplica(pedido)
     r_pedido = get_restaurante(pedido.get("restaurante_id", ""))
-    numero_rest = r_pedido.get("whatsapp_notificacion") if r_pedido else None
-    if numero_rest:
-        enviar_whatsapp(numero_rest,
-            f"❌ *Pedido #{pedido['id']} CANCELADO por el cliente*\n"
-            f"👤 +{numero}\n\n"
-            f"Si ya lo estabas preparando, puedes detenerlo."
-        )
+    notificar_restaurante(r_pedido,
+        f"❌ *Pedido #{pedido['id']} CANCELADO por el cliente*\n"
+        f"👤 +{numero}\n\n"
+        f"Si ya lo estabas preparando, puedes detenerlo."
+    )
 
 def ejecutar_modificar_pedido(pedido, numero, texto):
     agregar_modificacion(pedido["id"], texto)
     enviar_whatsapp(ADMIN_NUMBER, f"📝 Pedido #{pedido['id']} modificado\n+{numero}\n{texto}")
     r_pedido = get_restaurante(pedido.get("restaurante_id", ""))
-    numero_rest = r_pedido.get("whatsapp_notificacion") if r_pedido else None
 
     if pedido["estado"] == "activo":
         # Aún no lo acepta el restaurante: le llega el aviso directo por WhatsApp.
-        if numero_rest:
-            enviar_whatsapp(numero_rest,
-                f"🔄 *Pedido #{pedido['id']} MODIFICADO*\n"
-                f"👤 +{numero}\n"
-                f"────────────────\n"
-                f"{texto}\n"
-                f"────────────────\n"
-                f"👉 Entra a tu panel: {os.getenv('PANEL_URL', '')}/panel-restaurante"
-            )
+        notificar_restaurante(r_pedido,
+            f"🔄 *Pedido #{pedido['id']} MODIFICADO*\n"
+            f"👤 +{numero}\n"
+            f"────────────────\n"
+            f"{texto}\n"
+            f"────────────────\n"
+            f"👉 Entra a tu panel: {os.getenv('PANEL_URL', '')}/panel-restaurante"
+        )
         enviar_whatsapp(numero, "✅ Modificación recibida. ¡El equipo lo procesará! 🍔")
     else:
         # Ya está "preparando" (aceptado): dejamos la nota por si alcanzan a
         # verla, pero avisamos al cliente que puede no llegar a tiempo y le
         # damos el contacto directo del restaurante para hablar con alguien real.
-        if numero_rest:
-            aviso_contacto = f"Si es urgente, escríbeles directo: https://wa.me/{numero_rest}"
+        # Si hay varios números configurados, el link de contacto directo usa
+        # solo el primero (un link de WhatsApp no puede apuntar a varios).
+        primer_numero_rest = ((r_pedido.get("whatsapp_notificacion") or "").split(",")[0].strip()) if r_pedido else ""
+        if primer_numero_rest:
+            aviso_contacto = f"Si es urgente, escríbeles directo: https://wa.me/{primer_numero_rest}"
         else:
             aviso_contacto = "Si es urgente, escribe *encargado* para que te ayude nuestro equipo."
         enviar_whatsapp(numero,
@@ -1208,12 +1207,21 @@ def notificar_pedido_admin(numero, pedido, es_nuevo=True):
     )
     enviar_whatsapp(ADMIN_NUMBER, msg)
 
+def notificar_restaurante(r, mensaje):
+    """Manda un mensaje al WhatsApp de notificación del restaurante. Soporta
+    varios números separados por coma (ej. dueño y encargado) — les manda el
+    mismo mensaje a todos."""
+    if not r:
+        return
+    numeros = [n.strip() for n in (r.get("whatsapp_notificacion") or "").split(",") if n.strip()]
+    for numero in numeros:
+        enviar_whatsapp(numero, mensaje)
+
 def notificar_pedido_restaurante(pedido, rest_key, es_nuevo=True):
     """Manda el aviso de pedido nuevo/actualizado directo al WhatsApp del
-    restaurante, si tiene un número configurado para eso."""
+    restaurante, si tiene uno o más números configurados para eso."""
     r = get_restaurante(rest_key)
-    numero_rest = r.get("whatsapp_notificacion") if r else None
-    if not numero_rest:
+    if not r or not (r.get("whatsapp_notificacion") or "").strip():
         return
     icono = "🛵" if pedido["tipo"] == "domicilio" else "🏠"
     prefijo = "🛎️ *Pedido nuevo*" if es_nuevo else "🔄 *Pedido actualizado*"
@@ -1230,7 +1238,7 @@ def notificar_pedido_restaurante(pedido, rest_key, es_nuevo=True):
         f"────────────────\n"
         f"👉 Entra a tu panel: {os.getenv('PANEL_URL', '')}/panel-restaurante"
     )
-    enviar_whatsapp(numero_rest, msg)
+    notificar_restaurante(r, msg)
 
 # ── DOMICILIARIOS ────────────────────────────────────────────────────────────
 
@@ -2789,11 +2797,9 @@ async def aceptar_pedido_dom(request: Request):
             f"👉 {os.getenv('PANEL_URL', '')}/panel")
         # Notificar al restaurante que ya hay domiciliario asignado
         r_pedido = get_restaurante(pedido_check.get("restaurante_id", ""))
-        numero_rest = r_pedido.get("whatsapp_notificacion") if r_pedido else None
-        if numero_rest:
-            enviar_whatsapp(numero_rest,
-                f"🛵 *Domiciliario asignado al pedido #{pedido_id}*\n"
-                f"*{nombre}* aceptó la entrega y va en camino a recogerlo.")
+        notificar_restaurante(r_pedido,
+            f"🛵 *Domiciliario asignado al pedido #{pedido_id}*\n"
+            f"*{nombre}* aceptó la entrega y va en camino a recogerlo.")
         # Notificar al cliente
         pedido = get_pedido_by_id(pedido_id)
         if pedido:
