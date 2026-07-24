@@ -681,6 +681,7 @@ def verificar_subtotal(rest_key, productos_texto, subtotal_reportado, pedido_id,
         return
     r = get_restaurante(rest_key)
     recargo_dom_producto = float(r.get("recargo_domicilio_producto") or 0) if r else 0
+    recargo_dom_modo = (r.get("recargo_domicilio_modo") or "por_producto") if r else "por_producto"
     suma = 0
     cantidad_total = 0
     for linea in lineas:
@@ -691,11 +692,11 @@ def verificar_subtotal(rest_key, productos_texto, subtotal_reportado, pedido_id,
         cantidad = _extraer_cantidad(linea)
         suma += candidatos[0] * cantidad
         cantidad_total += cantidad
-    # Si el restaurante cobra un recargo por producto en domicilio, se lo
-    # sumamos aquí también — si no, esta verificación pensaría por error que
-    # Claude se equivocó en CADA pedido a domicilio de ese restaurante.
+    # Si el restaurante cobra un recargo en domicilio, se lo sumamos aquí
+    # también (según el modo) — si no, esta verificación pensaría por error
+    # que Claude se equivocó en CADA pedido a domicilio de ese restaurante.
     if tipo == "domicilio" and recargo_dom_producto > 0:
-        suma += cantidad_total * recargo_dom_producto
+        suma += recargo_dom_producto if recargo_dom_modo == "total" else cantidad_total * recargo_dom_producto
     diferencia = abs(suma - subtotal_reportado)
     umbral = max(2000, subtotal_reportado * 0.05)
     if diferencia > umbral:
@@ -1015,12 +1016,24 @@ def build_system_prompt(rest_key, cliente=None, descuento=None):
     espera = f"\nTIEMPO DE ESPERA: {extra['tiempo_espera']} minutos." if extra.get("tiempo_espera") else ""
     costo_dom_normal = costo_domicilio(r)
     costo_dom_txt = f"{costo_dom_normal:,.0f}".replace(",", ".")
-    # Algunos restaurantes cobran un poco más por producto cuando el pedido es
-    # a domicilio (para cubrir el costo del empaque, por ejemplo). Es opcional,
-    # configurado por restaurante — si está en 0, no cambia nada de lo de antes.
+    # Algunos restaurantes cobran un poco más cuando el pedido es a domicilio
+    # (para cubrir el costo del empaque, por ejemplo) — ya sea por producto o
+    # una sola vez sobre el total. Es opcional, configurado por restaurante —
+    # si está en 0, no cambia nada de lo de antes.
     recargo_dom_producto = float(r.get("recargo_domicilio_producto") or 0) if r else 0
+    recargo_dom_modo = (r.get("recargo_domicilio_modo") or "por_producto") if r else "por_producto"
     instr_recargo = ""
-    if recargo_dom_producto > 0:
+    if recargo_dom_producto > 0 and recargo_dom_modo == "total":
+        recargo_dom_txt = f"{recargo_dom_producto:,.0f}".replace(",", ".")
+        recargo_nota = f" Recargo de ${recargo_dom_txt} sobre el TOTAL del pedido SI es a domicilio (no aplica si recoge en el local)."
+        instr_recargo = (
+            f"\n- Si el pedido es a domicilio, súmale ${recargo_dom_txt} al total del pedido UNA SOLA VEZ (no a "
+            f"cada producto, es un solo cargo fijo) — es un recargo por domicilio, no aplica si el cliente recoge "
+            f"en el local. Si el cliente pregunta por qué el precio subió o de dónde sale ese aumento, explícale "
+            f"amablemente que es un recargo de ${recargo_dom_txt} sobre el total del pedido "
+            f"cuando es a domicilio."
+        )
+    elif recargo_dom_producto > 0:
         recargo_dom_txt = f"{recargo_dom_producto:,.0f}".replace(",", ".")
         recargo_nota = f" Cada producto tiene un recargo de ${recargo_dom_txt} SI el pedido es a domicilio (no aplica si recoge en el local)."
         instr_recargo = (
@@ -3598,6 +3611,7 @@ async def admin_crear_restaurante(request: Request):
             "ubicacion_gps": body.get("ubicacion_gps", ""),
             "radio_domicilio_km": float(body.get("radio_domicilio_km") or 8),
             "recargo_domicilio_producto": float(body.get("recargo_domicilio_producto") or 0),
+            "recargo_domicilio_modo": body.get("recargo_domicilio_modo") or "por_producto",
         }
         supabase.table("restaurantes").insert(r).execute()
         cargar_restaurantes()
