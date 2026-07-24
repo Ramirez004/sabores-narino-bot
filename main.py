@@ -1278,6 +1278,21 @@ def get_domiciliario_by_telefono(telefono):
     except Exception:
         return None
 
+def get_restaurante_por_numero_notificacion(numero):
+    """Si este número está configurado como número de aviso de pedidos de
+    algún restaurante (whatsapp_notificacion admite varios separados por
+    coma), devuelve ese restaurante. None si no es de ninguno — así el bot
+    puede avisarle que use su panel en vez de dejarlo pedir comida por error."""
+    objetivo = normalizar_telefono(numero)[-10:]
+    if not objetivo:
+        return None
+    for r in _cache_restaurantes.values():
+        numeros = (r.get("whatsapp_notificacion") or "").split(",")
+        for n in numeros:
+            if normalizar_telefono(n)[-10:] == objetivo:
+                return r
+    return None
+
 def get_domiciliario_by_id(dom_id):
     try:
         res = supabase.table("domiciliarios").select("*").eq("id", dom_id).execute()
@@ -3040,6 +3055,20 @@ async def recibir_mensaje(request: Request):
             if resp_admin:
                 enviar_whatsapp(numero, resp_admin)
                 return {"status": "ok"}
+
+        # ── RESTAURANTE ESCRIBIENDO AL NÚMERO DEL BOT (no a su panel) ──
+        # Este número (el que recibe pedidos de clientes) no distingue
+        # restaurantes — sin este aviso, el dueño terminaría metido en el
+        # flujo de pedir comida por accidente en vez de ir a su panel.
+        r_notif = get_restaurante_por_numero_notificacion(numero)
+        if r_notif:
+            enviar_whatsapp(numero,
+                f"👋 Hola, este número es para que tus *clientes* hagan pedidos — no es donde gestionas "
+                f"*{r_notif['nombre']}*.\n\n"
+                f"Para ver y manejar tus pedidos, entra a tu panel:\n"
+                f"{os.getenv('PANEL_URL', '')}/panel-restaurante"
+            )
+            return {"status": "ok"}
 
         # ── CALIFICACIÓN DE SERVICIO ───────────────────────────────────────────
         if clientes_esperando_calificacion.get(numero):
