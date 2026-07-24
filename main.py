@@ -1131,7 +1131,8 @@ def build_system_prompt(rest_key, cliente=None, descuento=None):
         instr_descuento = (
             "\n- Antes de mostrar el resumen final, pregúntale al cliente si tiene algún código de descuento o "
             "promocional (ej: \"¿Tienes algún código de descuento? Si tienes uno, escríbeme: código TUCODIGO\"). "
-            "Si dice que no tiene, sigue normal sin insistir más."
+            "Si dice que no tiene, NO insistas más — sigue de inmediato con el siguiente paso pendiente (o el "
+            "resumen final si ya tienes todo lo demás) EN ESE MISMO MENSAJE, sin esperar a que el cliente escriba otra cosa."
         )
 
     return f"""Eres el asistente virtual de *{r['nombre']}*, en {r['direccion']}, Ipiales.
@@ -1151,7 +1152,7 @@ INSTRUCCIONES:
 - NUNCA agregues al pedido un producto que no esté escrito tal cual en el MENÚ de arriba.
 - Si un producto aparece marcado como "(NO disponible hoy: ...)", NO lo ofrezcas ni lo agregues al pedido aunque el cliente lo pida — avísale amablemente que hoy no hay y sugiérele otra opción del menú.
 - NUNCA muestres resumen ni total hasta que el cliente diga "es todo", "listo", "eso sería" o similar.{upsell}
-- Solo entonces muestra resumen completo con total.
+- Cuando el cliente diga eso, todavía falta completar (en orden, sin saltarte ninguno): confirmar dirección si es domicilio, preguntar método de pago, y preguntar por código de descuento si no hay uno ya validado. Ve preguntando lo que falte una cosa a la vez — pero en cuanto tengas TODO completo, muestra el resumen final completo con total EN ESE MISMO MENSAJE, sin esperar a que el cliente te lo pida.
 - Si el cliente mencionó lugar de entrega, es domicilio. Confirma la dirección.{instr_recargo}
 - Si el pedido es a domicilio y NO tienes clara la dirección, dile textualmente algo como: "Para el domicilio, escríbeme tu dirección completa (barrio, calle/carrera y número), o si prefieres, envíame tu ubicación actual desde WhatsApp (toca el clip 📎 → Ubicación)." No cierres el pedido a domicilio sin dirección confirmada por ninguna de esas dos vías.
 - En el resumen final de un pedido a domicilio SIEMPRE detalla los datos de entrega: dirección exacta (o la ubicación que envió) y el nombre de quien recibe.
@@ -1164,6 +1165,7 @@ INSTRUCCIONES:
 - No inventes productos ni precios.
 - Si el cliente pregunta por otros restaurantes, quiere cambiar de restaurante, o pide ver la lista de restaurantes, responde EXACTAMENTE: "Claro 😊 Escribe *restaurantes* para ver todos los restaurantes disponibles."
 - NO digas que solo eres asistente de este restaurante. El cliente puede cambiar cuando quiera.
+- Regla general MUY IMPORTANTE: nunca dejes la conversación esperando sin avanzar. Cuando el cliente responda cualquier pregunta tuya (dirección, método de pago, si tiene o no código de descuento, etc.), NUNCA te quedes solo confirmando o agradeciendo su respuesta ("listo", "vale", "perfecto") sin decir nada más — SIEMPRE continúa en ese mismo mensaje con la siguiente pregunta pendiente, o con el resumen final si ya no falta nada. El cliente no debería tener que escribirte algo más para que sigas avanzando el pedido.
 - Responde siempre en español. Sé conciso."""
 
 # ── ENVÍO WHATSAPP ────────────────────────────────────────────────────────────
